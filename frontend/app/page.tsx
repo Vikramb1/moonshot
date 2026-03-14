@@ -34,7 +34,7 @@ export default function LandingPage() {
                 </span>
               </div>
               <span className="text-sm md:text-base text-retro-white uppercase">
-                Coin Rush
+                Moonshot 1.0
               </span>
               <span className="text-[8px] md:text-[10px] text-retro-white/40 uppercase">
                 Fly through the grid, collect coins, place orders

@@ -23,7 +23,7 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
   const rawLoss = searchParams.get('lossThreshold');
   const lossThreshold = rawLoss ? parseFloat(rawLoss) : null;
   const rawPos = searchParams.get('positionSize');
-  const positionSize = rawPos ? Math.max(1, parseFloat(rawPos)) : 100;
+  const positionSize = rawPos ? Math.max(0.5, parseFloat(rawPos)) : 100;
   const rawSymbol = searchParams.get('symbol');
   const symbol: TradingSymbol = (rawSymbol === 'BTC-PERP' || rawSymbol === 'SOL-PERP') ? rawSymbol : 'ETH-PERP';
   const useLive = searchParams.get('useLive') === '1';

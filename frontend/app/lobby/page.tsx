@@ -30,7 +30,7 @@ export default function LobbyPage() {
     params.set('symbol', symbol);
     if (useLive) params.set('useLive', '1');
     const ps = parseFloat(positionSize);
-    if (ps >= 1) params.set('positionSize', String(ps));
+    if (ps >= 0.5) params.set('positionSize', String(ps));
     router.push(`/game?${params.toString()}`);
   }
 
@@ -104,14 +104,14 @@ export default function LobbyPage() {
               <span className="text-retro-white/60 text-xs mr-2">$</span>
               <input
                 type="number"
-                min="1"
-                step="10"
+                min="0.5"
+                step="0.5"
                 value={positionSize}
                 onChange={(e) => setPositionSize(e.target.value)}
                 className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
               />
             </div>
-            <p className="text-[7px] text-retro-white/30">25x leverage · min $1</p>
+            <p className="text-[7px] text-retro-white/30">25x leverage · min $0.50</p>
           </div>
 
           {/* Trading Mode */}

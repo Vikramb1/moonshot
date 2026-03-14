@@ -17,7 +17,7 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
   const lossThreshold = rawLoss ? parseFloat(rawLoss) : null;
   const rawSize = searchParams.get('positionSize');
   const positionSize = rawSize ? parseFloat(rawSize) : 0.5;
-  return { duration, profitThreshold, lossThreshold, positionSize };
+  return { duration, profitThreshold, lossThreshold, positionSize, symbol: 'ETH-PERP' as const, useLive: false };
 }
 
 function SurfGamePageInner() {

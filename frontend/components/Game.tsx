@@ -266,8 +266,19 @@ export default function Game({ params, onGameEnd }: GameProps) {
           body: JSON.stringify({ symbol: params.symbol, size, side, leverage: 25 }),
         })
           .then((r) => r.json())
-          .then((data) => { if (data.success) recordTrade(data.order_id); })
-          .catch(() => {});
+          .then((data) => {
+            if (data.success) {
+              recordTrade(data.order_id);
+            } else {
+              console.warn('[LIVE TRADE FAILED]', data.error);
+              // Fall back to paper trade so game still works
+              recordTrade('paper-' + Date.now());
+            }
+          })
+          .catch((err) => {
+            console.warn('[LIVE TRADE ERROR]', err);
+            recordTrade('paper-' + Date.now());
+          });
       } else {
         // Paper trade — no network call
         recordTrade('paper-' + Date.now());
@@ -337,7 +348,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
       // --- Interpolate real/mock price ---
       s.interpFrame++;
-      const interpT = Math.min(s.interpFrame / 30, 1);
+      const interpT = Math.min(s.interpFrame / 10, 1);
       s.interpPrice = lerp(s.interpPrev, s.interpTarget, interpT);
 
       // Display price — always real WS data (game won't start without connection)

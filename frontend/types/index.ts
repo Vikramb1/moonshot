@@ -30,7 +30,7 @@ export type GameStatus = 'idle' | 'countdown' | 'playing' | 'ended';
  *  profit — totalPnL hit the profitThreshold
  *  loss   — totalPnL fell to -lossThreshold
  */
-export type GameEndReason = 'time' | 'profit' | 'loss';
+export type GameEndReason = 'time' | 'profit' | 'loss' | 'health';
 
 /**
  * A single collectible coin in the game world.
@@ -42,7 +42,7 @@ export type GameEndReason = 'time' | 'profit' | 'loss';
 export interface Coin {
   id: string;
   priceLevel: number;
-  position: { x: number; y: number; z: number };
+  position: { x: number; y: number };
   collected: boolean;
 }
 
@@ -94,4 +94,5 @@ export interface GameResult {
   duration: number;
   endReason: GameEndReason;
   totalPnL: number;
+  totalZoneEarnings: number;
 }

@@ -1,66 +1,55 @@
 'use client';
 
-/**
- * useGameEngine
- *
- * Central state manager for a single game session.
- * Owns all mutable game state and exposes functions that Game.tsx calls.
- * Uses mock order recording (no backend fetch).
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Coin, GameEndReason, GameParams, GameResult, GameStatus, Order } from '@/types';
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const DEFAULT_ORDER_SIZE_USD = 10;
-export const MIN_Y = -5;
-export const MAX_Y = 5;
-
-// ---------------------------------------------------------------------------
-// Hook
-// ---------------------------------------------------------------------------
+import type { GameEndReason, GameParams, GameResult, GameStatus, Order } from '@/types';
 
 export function useGameEngine(params: GameParams) {
   const [gameStatus, setGameStatus] = useState<GameStatus>('idle');
-  const [coinsCollected, setCoinsCollected] = useState<Coin[]>([]);
   const [ordersPlaced, setOrdersPlaced] = useState<Order[]>([]);
   const [timeRemaining, setTimeRemaining] = useState<number>(params.duration);
   const [totalPnL, setTotalPnL] = useState<number>(0);
+  const [health, setHealth] = useState<number>(100);
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const ordersRef = useRef<Order[]>([]);
+  const endedRef = useRef(false);
 
-  // ---------------------------------------------------------------------------
-  // startGame — immediately starts playing (countdown owned by game page)
-  // ---------------------------------------------------------------------------
+  // Refs that mirror state — used by game loop to avoid stale closures
+  const healthRef = useRef(100);
+  const timeRemainingRef = useRef<number>(params.duration);
+  const totalPnLRef = useRef(0);
+  const totalZoneEarningsRef = useRef(0);
 
   const startGame = useCallback(() => {
+    endedRef.current = false;
+    healthRef.current = 100;
+    timeRemainingRef.current = params.duration;
+    totalPnLRef.current = 0;
+    totalZoneEarningsRef.current = 0;
+    ordersRef.current = [];
     setGameStatus('playing');
     setTimeRemaining(params.duration);
+    setHealth(100);
+    setTotalPnL(0);
+    setOrdersPlaced([]);
     startTimeRef.current = Date.now();
 
     timerRef.current = setInterval(() => {
       setTimeRemaining((prev) => {
-        if (prev <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          return 0;
-        }
-        return prev - 1;
+        const next = prev <= 1 ? 0 : prev - 1;
+        timeRemainingRef.current = next;
+        if (next === 0 && timerRef.current) clearInterval(timerRef.current);
+        return next;
       });
     }, 1000);
   }, [params.duration]);
 
-  // ---------------------------------------------------------------------------
-  // endGame
-  // ---------------------------------------------------------------------------
-
   const endGame = useCallback(
-    (reason: GameEndReason): GameResult => {
+    (reason: GameEndReason): GameResult | null => {
+      if (endedRef.current) return null;
+      endedRef.current = true;
       if (timerRef.current) clearInterval(timerRef.current);
       setGameStatus('ended');
 
@@ -81,84 +70,65 @@ export function useGameEngine(params: GameParams) {
         totalSize,
         duration: elapsed,
         endReason: reason,
-        totalPnL,
+        totalPnL: totalPnLRef.current,
+        totalZoneEarnings: totalZoneEarningsRef.current,
       };
 
       setGameResult(result);
       return result;
     },
-    [params.duration, totalPnL],
+    [params.duration],
   );
 
-  // ---------------------------------------------------------------------------
-  // collectCoin — mock order recording (no backend fetch)
-  // ---------------------------------------------------------------------------
-
-  const collectCoin = useCallback((coin: Coin, currentPrice: number) => {
-    if (coin.collected) return;
-
-    setCoinsCollected((prev) => [...prev, { ...coin, collected: true }]);
-
-    const side: 'buy' | 'sell' = coin.priceLevel >= currentPrice ? 'buy' : 'sell';
-
-    const order: Order = {
-      coinId: coin.id,
-      priceLevel: coin.priceLevel,
-      size: DEFAULT_ORDER_SIZE_USD,
-      side,
-      timestamp: Date.now(),
-      liquidOrderId: `mock-${Date.now()}`,
-    };
-
+  const addOrder = useCallback((order: Order) => {
     ordersRef.current = [...ordersRef.current, order];
     setOrdersPlaced((prev) => [...prev, order]);
   }, []);
 
-  // ---------------------------------------------------------------------------
-  // checkGameEndConditions
-  // ---------------------------------------------------------------------------
+  const takeDamage = useCallback((amount: number) => {
+    setHealth((prev) => {
+      const next = Math.max(0, prev - amount);
+      healthRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const adjustHealth = useCallback((delta: number) => {
+    if (delta > 0) return; // health never recovers
+    setHealth((prev) => {
+      const next = Math.max(0, prev + delta);
+      healthRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const addZoneEarnings = useCallback((amount: number) => {
+    totalZoneEarningsRef.current += amount;
+  }, []);
 
   const checkGameEndConditions = useCallback(
     (currentPnL: number) => {
-      if (gameStatus !== 'playing') return;
-
+      if (endedRef.current) return;
+      totalPnLRef.current = currentPnL;
       setTotalPnL(currentPnL);
 
-      if (timeRemaining <= 0) {
-        endGame('time');
-        return;
-      }
-
-      if (params.profitThreshold !== null && currentPnL >= params.profitThreshold) {
-        endGame('profit');
-        return;
-      }
-
-      if (params.lossThreshold !== null && currentPnL <= -params.lossThreshold) {
-        endGame('loss');
-        return;
-      }
+      if (healthRef.current <= 0) { endGame('health'); return; }
+      if (timeRemainingRef.current <= 0) { endGame('time'); return; }
+      if (params.profitThreshold !== null && currentPnL >= params.profitThreshold) { endGame('profit'); return; }
+      if (params.lossThreshold !== null && currentPnL <= -params.lossThreshold) { endGame('loss'); return; }
     },
-    [gameStatus, timeRemaining, params.profitThreshold, params.lossThreshold, endGame],
+    [endGame, params.profitThreshold, params.lossThreshold],
   );
 
-  // Cleanup timer on unmount
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
   return {
-    gameStatus,
-    coinsCollected,
-    ordersPlaced,
-    timeRemaining,
-    totalPnL,
-    gameResult,
-    startGame,
-    endGame,
-    collectCoin,
-    checkGameEndConditions,
+    gameStatus, ordersPlaced, timeRemaining, totalPnL, health,
+    gameResult, startGame, endGame, addOrder, takeDamage, adjustHealth,
+    checkGameEndConditions, addZoneEarnings,
+    // Refs for direct game loop access (avoids stale closures)
+    endedRef, healthRef, timeRemainingRef, ordersRef,
   };
 }

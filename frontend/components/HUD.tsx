@@ -1,129 +1,304 @@
 'use client';
 
-/**
- * HUD — retro pixel-art heads-up display overlay
- */
+import { useEffect, useRef, useState } from 'react';
 
-import type { GameParams } from '@/types';
+function lerpVal(a: number, b: number, t: number) { return a + (b - a) * t; }
+
+function healthColor(val: number): [number, number, number] {
+  // Smooth interpolation: green(0,255,100) → yellow(255,200,0) → red(255,50,50)
+  if (val >= 60) {
+    const t = (val - 60) / 40;
+    return [
+      Math.round(lerpVal(255, 0, t)),
+      Math.round(lerpVal(200, 255, t)),
+      Math.round(lerpVal(0, 100, t)),
+    ];
+  } else {
+    const t = val / 60;
+    return [
+      255,
+      Math.round(lerpVal(50, 200, t)),
+      Math.round(lerpVal(50, 0, t)),
+    ];
+  }
+}
 
 interface HUDProps {
   currentPrice: number;
+  previousPrice: number;
+  priceDirection: 'up' | 'down' | 'neutral';
   timeRemaining: number;
-  coinsCollected: number;
-  ordersPlaced: number;
+  secondsOnTarget: number;
+  totalPlaced: number;
   estimatedPnL: number;
-  params: GameParams;
+  health: number;
+  hitFlash: boolean;
+  zoneNotification: { text: string; key: number } | null;
 }
 
 export default function HUD({
   currentPrice,
+  previousPrice,
+  priceDirection,
   timeRemaining,
-  coinsCollected,
-  ordersPlaced,
+  secondsOnTarget,
+  totalPlaced,
   estimatedPnL,
-  params,
+  health,
+  hitFlash,
+  zoneNotification,
 }: HUDProps) {
-  function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${String(s).padStart(2, '0')}`;
-  }
+  const [priceScale, setPriceScale] = useState(false);
+  const [hullBreach, setHullBreach] = useState(false);
+  const prevHealth = useRef(health);
 
-  function formatPnL(pnl: number): string {
-    const sign = pnl >= 0 ? '+' : '';
-    return `${sign}$${pnl.toFixed(2)}`;
-  }
+  // Health bar animation refs — direct DOM manipulation for 60fps smoothness
+  const healthBarRef = useRef<HTMLDivElement>(null);
+  const healthPctRef = useRef<HTMLSpanElement>(null);
+  const healthDisplayedRef = useRef(100);
+  const healthTargetRef = useRef(100);
+  const frameCountRef = useRef(0);
+
+  healthTargetRef.current = health;
+
+  useEffect(() => {
+    let animId: number;
+    const animate = () => {
+      const hd = healthDisplayedRef.current;
+      const target = healthTargetRef.current;
+      healthDisplayedRef.current = hd + (target - hd) * 0.06;
+      frameCountRef.current++;
+
+      const val = healthDisplayedRef.current;
+      const [r, g, b] = healthColor(val);
+      const color = `rgb(${r},${g},${b})`;
+
+      // Pulse when low
+      let opacity = 1;
+      if (val < 30) {
+        opacity = 0.7 + 0.3 * Math.sin(frameCountRef.current * 0.15);
+      }
+
+      if (healthBarRef.current) {
+        healthBarRef.current.style.width = `${val}%`;
+        healthBarRef.current.style.background = color;
+        healthBarRef.current.style.opacity = String(opacity);
+      }
+      if (healthPctRef.current) {
+        healthPctRef.current.textContent = `${Math.round(val)}%`;
+        healthPctRef.current.style.color = color;
+      }
+
+      animId = requestAnimationFrame(animate);
+    };
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  useEffect(() => {
+    setPriceScale(true);
+    const t = setTimeout(() => setPriceScale(false), 150);
+    return () => clearTimeout(t);
+  }, [currentPrice]);
+
+  useEffect(() => {
+    if (health < prevHealth.current - 5) {
+      setHullBreach(true);
+      const t = setTimeout(() => setHullBreach(false), 600);
+      prevHealth.current = health;
+      return () => clearTimeout(t);
+    }
+    prevHealth.current = health;
+  }, [health]);
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  };
+
+  const pctChange = previousPrice > 0
+    ? ((currentPrice - previousPrice) / previousPrice * 100).toFixed(2)
+    : '0.00';
+  const pctPositive = parseFloat(pctChange) >= 0;
 
   const isLowTime = timeRemaining <= 10;
-  const isPnLPositive = estimatedPnL > 0;
+  const isPnLPositive = estimatedPnL >= 0;
 
-  const profitProgress =
-    params.profitThreshold !== null && params.profitThreshold > 0
-      ? Math.min(100, (Math.max(0, estimatedPnL) / params.profitThreshold) * 100)
-      : null;
-
-  const lossProgress =
-    params.lossThreshold !== null && params.lossThreshold > 0
-      ? Math.min(100, (Math.max(0, -estimatedPnL) / params.lossThreshold) * 100)
-      : null;
-
-  // Render blocky progress bar segments
-  function PixelBar({ progress, color }: { progress: number; color: string }) {
-    const segments = 10;
-    const filled = Math.round((progress / 100) * segments);
-    return (
-      <div className="flex gap-0.5">
-        {Array.from({ length: segments }, (_, i) => (
-          <div
-            key={i}
-            className={`w-3 h-2 border border-retro-white/20 ${
-              i < filled ? color : 'bg-space-dark/50'
-            }`}
-          />
-        ))}
-      </div>
-    );
-  }
+  const panelStyle: React.CSSProperties = {
+    border: '4px solid #f8f8f0',
+    background: 'rgba(13, 31, 45, 0.9)',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+  };
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none z-10">
-      {/* Top-left: BTC price */}
-      <div className="absolute top-3 left-3 text-[8px]">
-        <span className="text-retro-white/40 mr-1">BTC/USD</span>
-        <span className="text-retro-green text-[10px]">
-          {currentPrice > 0 ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '--'}
-        </span>
+    <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 10 }}>
+      {/* Top left — asset panel */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', top: 16, left: 16,
+        padding: '10px 14px',
+      }}>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>BTC / USD</div>
+        <div style={{
+          fontSize: 14, fontWeight: 'bold', color: '#f0f0e0',
+          transform: priceScale ? 'scale(1.04)' : 'scale(1)',
+          transition: 'transform 0.15s ease',
+          marginTop: 4,
+        }}>
+          ${currentPrice > 0 ? currentPrice.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--'}
+          <span style={{
+            color: priceDirection === 'up' ? '#40a030' : priceDirection === 'down' ? '#c03020' : 'rgba(240,240,224,0.4)',
+            marginLeft: 6, fontSize: 10,
+          }}>
+            {priceDirection === 'up' ? '▲' : priceDirection === 'down' ? '▼' : ''}
+          </span>
+        </div>
+        <div style={{ fontSize: 7, color: pctPositive ? '#40a030' : '#c03020', marginTop: 2 }}>
+          {pctPositive ? '+' : ''}{pctChange}%
+        </div>
       </div>
 
-      {/* Top-right: timer */}
-      <div
-        className={`absolute top-3 right-3 text-lg tabular-nums transition-colors ${
-          isLowTime ? 'text-retro-red' : 'text-retro-white'
-        }`}
-        style={isLowTime ? { textShadow: '0 0 10px rgba(192, 48, 32, 0.8)' } : undefined}
-      >
-        {formatTime(timeRemaining)}
+      {/* Top center — health bar */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 14px',
+        borderColor: hitFlash ? 'rgba(255,50,50,0.8)' : '#f8f8f0',
+        transition: 'border-color 0.1s ease',
+      }}>
+        <span style={{
+          fontSize: 9, letterSpacing: 3,
+          color: 'rgba(0, 220, 255, 0.65)',
+          fontFamily: "'Space Mono', monospace",
+        }}>HULL</span>
+        <div style={{
+          width: 200, height: 14,
+          background: 'rgba(255,255,255,0.06)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 99,
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div
+            ref={healthBarRef}
+            style={{
+              width: '100%', height: '100%',
+              borderRadius: 99,
+              background: 'rgb(0, 255, 100)',
+            }}
+          />
+        </div>
+        <span
+          ref={healthPctRef}
+          style={{
+            fontSize: 10,
+            fontFamily: "'Space Mono', monospace",
+            fontWeight: 'bold',
+            color: 'rgb(0, 255, 100)',
+            minWidth: 32,
+          }}
+        >100%</span>
       </div>
 
-      {/* Bottom-left: coins + orders */}
-      <div className="absolute bottom-4 left-3 text-[8px] text-retro-white/50">
-        <span>{coinsCollected} coins</span>
-        <span className="mx-1 text-retro-white/20">|</span>
-        <span>{ordersPlaced} orders</span>
+      {/* Top right — timer */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', top: 16, right: 88,
+        padding: '10px 14px', textAlign: 'right',
+      }}>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>TIME</div>
+        <div style={{
+          fontSize: 16, fontWeight: 'bold',
+          color: isLowTime ? '#c03020' : '#f0f0e0',
+          animation: isLowTime ? 'timerShake 0.1s infinite alternate' : undefined,
+          marginTop: 4,
+        }}>
+          {formatTime(timeRemaining)}
+        </div>
       </div>
 
-      {/* Bottom-right: PnL */}
-      <div
-        className={`absolute bottom-4 right-3 text-sm tabular-nums ${
-          isPnLPositive ? 'text-retro-green' : estimatedPnL < 0 ? 'text-retro-red' : 'text-retro-white/50'
-        }`}
-      >
-        {formatPnL(estimatedPnL)}
+      {/* Bottom left — trade stats */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', bottom: 20, left: 16,
+        padding: '8px 14px',
+      }}>
+        <div style={{ fontSize: 7, color: 'rgba(240,240,224,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+          <span style={{ color: '#e06030' }}>●</span>{' '}
+          {secondsOnTarget}s on target
+        </div>
+        <div style={{ fontSize: 7, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <span style={{ color: '#e06030' }}>●</span>{' '}
+          ${totalPlaced.toFixed(2)} placed
+        </div>
       </div>
 
-      {/* Progress bars */}
-      {(profitProgress !== null || lossProgress !== null) && (
-        <div className="absolute bottom-12 left-3 right-3 flex flex-col gap-2">
-          {profitProgress !== null && (
-            <div className="flex items-center gap-2">
-              <span className="text-[7px] text-retro-white/40 w-10 shrink-0 uppercase">Profit</span>
-              <PixelBar progress={profitProgress} color="bg-retro-green" />
-              <span className="text-[7px] text-retro-white/40 w-12 text-right shrink-0">
-                ${params.profitThreshold?.toFixed(2)}
-              </span>
-            </div>
-          )}
-          {lossProgress !== null && (
-            <div className="flex items-center gap-2">
-              <span className="text-[7px] text-retro-white/40 w-10 shrink-0 uppercase">Loss</span>
-              <PixelBar progress={lossProgress} color="bg-retro-red" />
-              <span className="text-[7px] text-retro-white/40 w-12 text-right shrink-0">
-                ${params.lossThreshold?.toFixed(2)}
-              </span>
-            </div>
-          )}
+      {/* Bottom right — PnL */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', bottom: 20, right: 88,
+        padding: '10px 14px', textAlign: 'right',
+      }}>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>EST. PNL</div>
+        <div style={{
+          fontSize: 14, fontWeight: 'bold',
+          color: isPnLPositive ? '#40a030' : '#c03020',
+          marginTop: 4,
+        }}>
+          {isPnLPositive ? '+' : ''}${estimatedPnL.toFixed(2)}
+        </div>
+      </div>
+
+      {/* Zone earnings notification — bottom center */}
+      {zoneNotification && (
+        <div key={zoneNotification.key} style={{
+          position: 'absolute', bottom: 40, left: '50%',
+          transform: 'translateX(-50%)',
+          border: '4px solid #40a030',
+          background: 'rgba(13, 31, 45, 0.9)',
+          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+          padding: '8px 20px',
+          fontSize: 8, fontWeight: 'bold',
+          color: '#40a030',
+          animation: 'zoneEarn 1.7s ease-out forwards',
+          pointerEvents: 'none',
+          textTransform: 'uppercase',
+          letterSpacing: 1,
+        }}>
+          {zoneNotification.text}
         </div>
       )}
+
+      {/* Hull breach overlay */}
+      {hullBreach && (
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          fontSize: 12, fontWeight: 'bold', color: '#c03020',
+          animation: 'hullBreach 0.6s ease-out forwards',
+          pointerEvents: 'none',
+          textShadow: '0 0 10px rgba(192, 48, 32, 0.6)',
+          textTransform: 'uppercase',
+          letterSpacing: 2,
+        }}>
+          HULL BREACH
+        </div>
+      )}
+
+      <style>{`
+        @keyframes timerShake { from { transform: translateX(-2px); } to { transform: translateX(2px); } }
+        @keyframes hullBreach {
+          0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          50% { transform: translate(-50%, -50%) scale(1.08); }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+        }
+        @keyframes zoneEarn {
+          0% { opacity: 1; transform: translateX(-50%) translateY(10px); }
+          12% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          82% { opacity: 1; transform: translateX(-50%) translateY(0); }
+          100% { opacity: 0; transform: translateX(-50%) translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }

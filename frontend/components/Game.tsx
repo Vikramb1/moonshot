@@ -1,300 +1,892 @@
 'use client';
 
-/**
- * Game — main Three.js game component
- *
- * Renders the game world via @react-three/fiber's <Canvas>.
- * useGameEngine is lifted here so HUD gets live data.
- */
-
-import { useCallback, useEffect, useRef } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import * as THREE from 'three';
+import { useEffect, useRef, useState } from 'react';
 import { useMockPrice } from '@/lib/useMockPrice';
-import { useGameEngine, MIN_Y, MAX_Y } from '@/lib/useGameEngine';
+import { useGameEngine } from '@/lib/useGameEngine';
 import HUD from './HUD';
-import PriceLine from './PriceLine';
-import type { Coin, GameParams, GameResult, Order } from '@/types';
+import type { GameParams, GameResult, Order } from '@/types';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+const SCROLL_SPEED = 2.0;
+const INITIAL_SPEED = 2.2;
+const MAX_SPEED = 6.5;
+const ACCELERATION_RAMP = 0.06;
+const SAFE_ZONE_HALF = 32;
+const ASTEROID_BASE_INTERVAL = 28;
+const GAME_AREA_PCT = 0.75;
+const PRICE_AXIS_W = 68;
+const EARNINGS_PER_SECOND = 0.50;
 
-const SCROLL_SPEED = 0.05;
-const SHIP_SPEED = 0.15;
-const COLLISION_RADIUS = 0.6;
-const COIN_LOOKAHEAD = 15;
-const COIN_SPAWN_OFFSET = 20;
-const PRICE_RANGE_PCT = 0.02;
+// Chart range — tuned for low volatility ±0.01%
+const VISIBLE_RANGE_PCT = 0.0001;
+const CHART_HEIGHT_FRACTION = 0.35;
+
+// Simulated price constants
+const SEED_PRICE = 65000;
+const NOISE_FREQUENCY = 0.06;
+
+// Colors
+const COL_BG = '#0d0816';
+const COL_LINE = 'rgba(220, 220, 240, 1)';
+const COL_LINE_GLOW = 'rgba(180, 140, 220, 0.5)';
+const COL_CYAN = 'rgba(0, 220, 255, 1)';
+const COL_SAFE = 'rgba(0, 255, 150, 1)';
+
+// ---------------------------------------------------------------------------
+// Internal types
+// ---------------------------------------------------------------------------
+interface Star { x: number; y: number; r: number; baseA: number; twinkle: boolean; phase: number; period: number }
+interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; radius: number; color: string }
+interface FloatingText { text: string; x: number; y: number; opacity: number; vy: number; life: number; color: string; size: number }
+interface Asteroid {
+  x: number; y: number; vx: number; vy: number;
+  rotation: number; rotSpeed: number; radius: number;
+  vertices: { x: number; y: number }[];
+  detailOffsets: { ox: number; oy: number }[];
+  glowIntensity: number;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function mapPriceToY(priceLevel: number, currentPrice: number): number {
-  if (currentPrice === 0) return 0;
-  const priceRange = currentPrice * PRICE_RANGE_PCT;
-  const low = currentPrice - priceRange;
-  const high = currentPrice + priceRange;
-  const t = Math.max(0, Math.min(1, (priceLevel - low) / (high - low)));
-  return MIN_Y + t * (MAX_Y - MIN_Y);
+function mapPrice(price: number, min: number, max: number, canvasH: number): number {
+  const chartTopY = canvasH * 0.5 - canvasH * CHART_HEIGHT_FRACTION * 0.5;
+  const chartBottomY = canvasH * 0.5 + canvasH * CHART_HEIGHT_FRACTION * 0.5;
+  const t = (price - min) / (max - min);
+  return chartBottomY - t * (chartBottomY - chartTopY);
 }
 
-function generateCoin(shipX: number, currentPrice: number, index: number): Coin {
-  const priceRange = currentPrice * PRICE_RANGE_PCT;
-  const priceLevel = currentPrice - priceRange + Math.random() * 2 * priceRange;
-  const y = mapPriceToY(priceLevel, currentPrice);
-  const x = shipX + COIN_SPAWN_OFFSET + index * 3;
+function lerp(a: number, b: number, t: number) { return a + (b - a) * t; }
 
-  return {
-    id: `coin-${Date.now()}-${index}-${Math.random()}`,
-    priceLevel,
-    position: { x, y, z: 0 },
-    collected: false,
-  };
+function generateAsteroidVertices(radius: number): { x: number; y: number }[] {
+  const n = 6 + Math.floor(Math.random() * 3);
+  const verts: { x: number; y: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const angle = (i / n) * Math.PI * 2 + (Math.random() - 0.5) * 0.6;
+    const r = radius * (0.7 + Math.random() * 0.6);
+    verts.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+  }
+  return verts;
 }
 
 // ---------------------------------------------------------------------------
-// Scene (runs inside <Canvas>)
+// Ship drawing
 // ---------------------------------------------------------------------------
+function drawShip(ctx: CanvasRenderingContext2D, frame: number) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 22, 5, 0, 0, Math.PI * 2);
+  const fuselageGrad = ctx.createLinearGradient(0, -5, 0, 5);
+  fuselageGrad.addColorStop(0, 'rgba(40, 60, 90, 1)');
+  fuselageGrad.addColorStop(1, 'rgba(15, 25, 45, 1)');
+  ctx.fillStyle = fuselageGrad;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(80, 160, 220, 0.6)';
+  ctx.lineWidth = 0.75;
+  ctx.stroke();
+  ctx.restore();
 
-interface SceneProps {
-  currentPrice: number;
-  previousPrice: number;
-  priceDirection: 'up' | 'down' | 'neutral';
-  gameStatus: string;
-  ordersPlaced: Order[];
-  onCollectCoin: (coin: Coin, currentPrice: number) => void;
-  onCheckEnd: (pnl: number) => void;
-}
+  ctx.beginPath();
+  ctx.moveTo(0, -5); ctx.lineTo(-14, -22); ctx.lineTo(-20, -8);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(20, 45, 80, 1)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(60, 130, 200, 0.5)'; ctx.lineWidth = 0.75; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, -5); ctx.lineTo(-14, -22);
+  ctx.strokeStyle = 'rgba(0, 180, 255, 0.6)'; ctx.lineWidth = 1; ctx.stroke();
 
-function Scene({
-  currentPrice,
-  previousPrice,
-  priceDirection,
-  gameStatus,
-  ordersPlaced,
-  onCollectCoin,
-  onCheckEnd,
-}: SceneProps) {
-  const { camera } = useThree();
+  ctx.beginPath();
+  ctx.moveTo(0, 5); ctx.lineTo(-14, 22); ctx.lineTo(-20, 8);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(20, 45, 80, 1)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(60, 130, 200, 0.5)'; ctx.lineWidth = 0.75; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, 5); ctx.lineTo(-14, 22);
+  ctx.strokeStyle = 'rgba(0, 180, 255, 0.6)'; ctx.lineWidth = 1; ctx.stroke();
 
-  const shipRef = useRef<THREE.Group>(null);
-  const shipPosRef = useRef({ x: 0, y: 0 });
-  const keysRef = useRef<Record<string, boolean>>({});
-  const coinsRef = useRef<Coin[]>([]);
-  const coinMeshesRef = useRef<Map<string, THREE.Mesh>>(new Map());
+  ctx.fillStyle = 'rgba(10, 20, 40, 1)';
+  ctx.strokeStyle = 'rgba(0, 180, 255, 0.4)'; ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.roundRect(-23, -12.5, 10, 5, 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.roundRect(-23, 7.5, 10, 5, 2); ctx.fill(); ctx.stroke();
 
-  // WASD input
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = true;
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keysRef.current[e.key.toLowerCase()] = false;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, []);
+  const glowR1 = 3 + Math.sin(frame * 0.18) * 0.8;
+  const glowR2 = 3 + Math.sin(frame * 0.18 + 1.5) * 0.8;
+  const g1 = ctx.createRadialGradient(-25, -10, 0, -25, -10, glowR1);
+  g1.addColorStop(0, 'rgba(0, 220, 255, 0.9)'); g1.addColorStop(1, 'rgba(0, 220, 255, 0)');
+  ctx.fillStyle = g1; ctx.fillRect(-25 - glowR1, -10 - glowR1, glowR1 * 2, glowR1 * 2);
+  const g2 = ctx.createRadialGradient(-25, 10, 0, -25, 10, glowR2);
+  g2.addColorStop(0, 'rgba(0, 220, 255, 0.9)'); g2.addColorStop(1, 'rgba(0, 220, 255, 0)');
+  ctx.fillStyle = g2; ctx.fillRect(-25 - glowR2, 10 - glowR2, glowR2 * 2, glowR2 * 2);
 
-  // Init coin grid when game starts playing
-  useEffect(() => {
-    if (gameStatus !== 'playing' || coinsRef.current.length > 0) return;
-    if (currentPrice === 0) return;
+  ctx.strokeStyle = 'rgba(0, 180, 255, 0.15)'; ctx.lineWidth = 0.5;
+  ctx.beginPath(); ctx.moveTo(-16, -2); ctx.lineTo(16, -2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-16, 0); ctx.lineTo(16, 0); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-16, 2); ctx.lineTo(16, 2); ctx.stroke();
 
-    const initial: Coin[] = [];
-    for (let i = 0; i < COIN_LOOKAHEAD; i++) {
-      initial.push(generateCoin(0, currentPrice, i));
-    }
-    coinsRef.current = initial;
-  }, [gameStatus, currentPrice]);
+  ctx.beginPath(); ctx.ellipse(8, 0, 6, 3.5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0, 220, 255, 0.25)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 220, 255, 0.7)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath(); ctx.ellipse(9, -1, 3, 1.5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.15)'; ctx.fill();
 
-  // Main game loop
-  useFrame(() => {
-    if (gameStatus !== 'playing') return;
-
-    // WASD movement
-    if (keysRef.current['w']) {
-      shipPosRef.current.y = Math.min(MAX_Y, shipPosRef.current.y + SHIP_SPEED);
-    }
-    if (keysRef.current['s']) {
-      shipPosRef.current.y = Math.max(MIN_Y, shipPosRef.current.y - SHIP_SPEED);
-    }
-
-    // Auto-scroll right
-    shipPosRef.current.x += SCROLL_SPEED;
-
-    if (shipRef.current) {
-      shipRef.current.position.set(shipPosRef.current.x, shipPosRef.current.y, 0);
-    }
-
-    camera.position.x = shipPosRef.current.x;
-
-    // Spawn new coins
-    const ahead = coinsRef.current.filter(
-      (c) => !c.collected && c.position.x > shipPosRef.current.x,
-    );
-    if (ahead.length < COIN_LOOKAHEAD && currentPrice > 0) {
-      const maxX = coinsRef.current.reduce((m, c) => Math.max(m, c.position.x), 0);
-      const newCoin = generateCoin(
-        Math.max(shipPosRef.current.x, maxX - COIN_SPAWN_OFFSET),
-        currentPrice,
-        coinsRef.current.length,
-      );
-      coinsRef.current = [...coinsRef.current, newCoin];
-    }
-
-    // Collision detection
-    const shipX = shipPosRef.current.x;
-    const shipY = shipPosRef.current.y;
-
-    coinsRef.current = coinsRef.current.map((coin) => {
-      if (coin.collected) return coin;
-
-      const dx = shipX - coin.position.x;
-      const dy = shipY - coin.position.y;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-
-      if (distance < COLLISION_RADIUS) {
-        const mesh = coinMeshesRef.current.get(coin.id);
-        if (mesh) mesh.scale.setScalar(0);
-
-        onCollectCoin({ ...coin, collected: true }, currentPrice);
-        return { ...coin, collected: true };
-      }
-      return coin;
-    });
-
-    // Compute PnL from orders
-    const pnl = ordersPlaced.reduce((sum, order) => {
-      const diff = currentPrice - order.priceLevel;
-      return sum + diff * order.size * (order.side === 'buy' ? 1 : -1);
-    }, 0);
-
-    onCheckEnd(pnl);
-  });
-
-  return (
-    <>
-      <ambientLight intensity={0.3} />
-      <pointLight position={[0, 0, 5]} intensity={1} color={0x00ccff} />
-
-      {/* Ship */}
-      <group ref={shipRef} position={[0, 0, 0]}>
-        <mesh rotation={[0, 0, -Math.PI / 2]}>
-          <coneGeometry args={[0.3, 0.8, 8]} />
-          <meshStandardMaterial color={0x00ccff} emissive={0x004466} />
-        </mesh>
-        <pointLight color={0x00ccff} intensity={2} distance={4} />
-      </group>
-
-      {/* Coins */}
-      <group>
-        {coinsRef.current
-          .filter((c) => !c.collected)
-          .map((coin) => (
-            <mesh
-              key={coin.id}
-              position={[coin.position.x, coin.position.y, coin.position.z]}
-              ref={(mesh) => {
-                if (mesh) coinMeshesRef.current.set(coin.id, mesh);
-                else coinMeshesRef.current.delete(coin.id);
-              }}
-            >
-              <torusGeometry args={[0.3, 0.08, 8, 24]} />
-              <meshStandardMaterial
-                color={coin.priceLevel >= currentPrice ? 0x00ffff : 0xff6b35}
-                emissive={coin.priceLevel >= currentPrice ? 0x004444 : 0x441100}
-              />
-            </mesh>
-          ))}
-      </group>
-
-      {/* Price line */}
-      <PriceLine
-        currentPrice={currentPrice}
-        previousPrice={previousPrice}
-        priceDirection={priceDirection}
-      />
-    </>
-  );
+  ctx.beginPath();
+  ctx.moveTo(22, -4); ctx.quadraticCurveTo(36, -1, 42, 0);
+  ctx.quadraticCurveTo(36, 1, 22, 4); ctx.closePath();
+  ctx.fillStyle = 'rgba(0, 200, 240, 0.9)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 220, 255, 1)'; ctx.lineWidth = 1; ctx.stroke();
+  ctx.beginPath(); ctx.arc(42, 0, 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'; ctx.fill();
 }
 
 // ---------------------------------------------------------------------------
-// Game — exported component (owns engine + mock price)
+// Component
 // ---------------------------------------------------------------------------
-
 interface GameProps {
   params: GameParams;
   onGameEnd: (result: GameResult) => void;
-  onStartGame?: () => void;
 }
 
-export default function Game({ params, onGameEnd, onStartGame }: GameProps) {
+export default function Game({ params, onGameEnd }: GameProps) {
   const { currentPrice, previousPrice, priceDirection, isConnected } = useMockPrice();
   const engine = useGameEngine(params);
 
-  // Start game on mount
-  useEffect(() => {
-    engine.startGame();
-    if (onStartGame) onStartGame();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const gameCanvasRef = useRef<HTMLCanvasElement>(null);
+  const animFrameRef = useRef<number>(0);
+  const frameRef = useRef(0);
 
-  // Fire onGameEnd when engine signals end
+  const [zoneNotif, setZoneNotif] = useState<{ text: string; key: number } | null>(null);
+  const zoneNotifTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [hitFlash, setHitFlash] = useState(false);
+  const hitFlashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [secondsOnTarget, setSecondsOnTarget] = useState(0);
+
+  // Mutable game state
+  const stateRef = useRef({
+    shipY: 0,
+    shipVelY: 0,
+    shipTiltAngle: 0,
+    shipShake: 0,
+    bobPhase: 0,
+    wHeldFrames: 0,
+    sHeldFrames: 0,
+    keys: {} as Record<string, boolean>,
+    stars: [] as Star[],
+    gridOffsetX: 0,
+    scanX: 0,
+    priceHistoryPx: [] as number[],
+    interpPrice: 0,
+    interpTarget: 0,
+    interpPrev: 0,
+    interpFrame: 0,
+    displayPrice: SEED_PRICE,
+    // Dynamic price range
+    animMin: 0,
+    animMax: 0,
+    targetMin: 0,
+    targetMax: 0,
+    rescaleStartMin: 0,
+    rescaleStartMax: 0,
+    rescaleFrame: 45,
+    // Simulated price state
+    simPrice: SEED_PRICE,
+    simNoiseAmp: SEED_PRICE * 0.0001,
+    simSpikeValue: 0,
+    simSpikeFrames: 0,
+    simDeltaHistory: [] as number[],
+    simLastPrice: SEED_PRICE,
+    // Game objects
+    asteroids: [] as Asteroid[],
+    asteroidTimer: 0,
+    particles: [] as Particle[],
+    floatingTexts: [] as FloatingText[],
+    shieldAlpha: 0,
+    wasInSafe: false,
+    consecutiveZoneFrames: 0,
+    totalZoneFrames: 0,
+    totalZoneEarnings: 0,
+    flashRed: 0,
+    flashWhite: { x: 0, y: 0, life: 0 },
+    mounted: false,
+    lastWsPrice: 0,
+  });
+
+  useEffect(() => { engine.startGame(); }, []);
+
   useEffect(() => {
     if (engine.gameStatus === 'ended' && engine.gameResult) {
       onGameEnd(engine.gameResult);
     }
   }, [engine.gameStatus, engine.gameResult, onGameEnd]);
 
-  const handleCollectCoin = useCallback(
-    (coin: Coin, price: number) => {
-      engine.collectCoin(coin, price);
-    },
-    [engine.collectCoin],
-  );
+  useEffect(() => {
+    const s = stateRef.current;
+    const down = (e: KeyboardEvent) => { s.keys[e.key] = true; s.keys[e.code] = true; };
+    const up = (e: KeyboardEvent) => { s.keys[e.key] = false; s.keys[e.code] = false; };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+  }, []);
 
-  const handleCheckEnd = useCallback(
-    (pnl: number) => {
+  useEffect(() => {
+    const s = stateRef.current;
+    if (currentPrice === s.lastWsPrice) return;
+    s.interpPrev = s.lastWsPrice || currentPrice;
+    s.interpTarget = currentPrice;
+    s.interpFrame = 0;
+    s.lastWsPrice = currentPrice;
+  }, [currentPrice]);
+
+  useEffect(() => {
+    const resize = () => {
+      [bgCanvasRef, gameCanvasRef].forEach(ref => {
+        if (ref.current) { ref.current.width = window.innerWidth; ref.current.height = window.innerHeight; }
+      });
+    };
+    resize();
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
+
+  // =========================================================================
+  // MAIN GAME LOOP
+  // =========================================================================
+  useEffect(() => {
+    if (engine.gameStatus !== 'playing') return;
+
+    const s = stateRef.current;
+    const bgC = bgCanvasRef.current;
+    const gC = gameCanvasRef.current;
+    if (!bgC || !gC) return;
+    const bgCtx = bgC.getContext('2d')!;
+    const ctx = gC.getContext('2d')!;
+
+    if (!s.mounted) {
+      s.mounted = true;
+      s.shipY = gC.height / 2;
+      const initPrice = currentPrice || SEED_PRICE;
+      s.interpPrice = initPrice;
+      s.interpPrev = initPrice;
+      s.interpTarget = initPrice;
+      s.simPrice = initPrice;
+      s.simLastPrice = initPrice;
+      s.displayPrice = initPrice;
+      const halfRange = initPrice * VISIBLE_RANGE_PCT;
+      s.animMin = initPrice - halfRange;
+      s.animMax = initPrice + halfRange;
+      s.targetMin = s.animMin;
+      s.targetMax = s.animMax;
+      s.rescaleStartMin = s.animMin;
+      s.rescaleStartMax = s.animMax;
+      s.rescaleFrame = 45;
+      for (let i = 0; i < 220; i++) {
+        s.stars.push({
+          x: Math.random() * gC.width, y: Math.random() * gC.height,
+          r: 0.4 + Math.random() * 1.2, baseA: 0.25 + Math.random() * 0.6,
+          twinkle: Math.random() < 0.3, phase: Math.random() * Math.PI * 2,
+          period: 2 + Math.random() * 3,
+        });
+      }
+    }
+
+    function tick() {
+      if (engine.endedRef.current) return;
+
+      const W = gC!.width;
+      const H = gC!.height;
+      const gameW = W * GAME_AREA_PCT;
+      const shipX = gameW * 0.72;
+      const frame = frameRef.current++;
+
+      // --- Interpolate real/mock price ---
+      s.interpFrame++;
+      const interpT = Math.min(s.interpFrame / 30, 1);
+      s.interpPrice = lerp(s.interpPrev, s.interpTarget, interpT);
+
+      // --- Simulated price (when disconnected) ---
+      if (!isConnected) {
+        const baseAmp = s.simNoiseAmp;
+        const noiseOffset =
+          Math.sin(frame * NOISE_FREQUENCY) * baseAmp
+          + Math.sin(frame * NOISE_FREQUENCY * 2.3) * baseAmp * 0.4
+          + Math.sin(frame * NOISE_FREQUENCY * 0.7) * baseAmp * 0.6;
+
+        const trendOffset = Math.sin(frame * 0.004) * SEED_PRICE * 0.00008;
+
+        // Spike injection every 180 frames
+        if (frame > 0 && frame % 180 === 0) {
+          s.simSpikeValue = (Math.random() - 0.5) * SEED_PRICE * 0.0002;
+          s.simSpikeFrames = 10;
+        }
+        const spike = s.simSpikeFrames > 0 ? s.simSpikeValue : 0;
+        if (s.simSpikeFrames > 0) s.simSpikeFrames--;
+
+        s.simPrice = SEED_PRICE + noiseOffset + trendOffset + spike;
+
+        // Auto-scale noise
+        const delta = Math.abs(s.simPrice - s.simLastPrice) / s.simPrice;
+        s.simDeltaHistory.push(delta);
+        if (s.simDeltaHistory.length > 10) s.simDeltaHistory.shift();
+        if (s.simDeltaHistory.length >= 3) {
+          const avgDelta = s.simDeltaHistory.reduce((a, b) => a + b, 0) / s.simDeltaHistory.length;
+          const baseLine = SEED_PRICE * 0.0001;
+          if (avgDelta < 0.00003) s.simNoiseAmp = baseLine * 2.5;
+          else if (avgDelta > 0.00015) s.simNoiseAmp = baseLine * 0.6;
+          else s.simNoiseAmp = baseLine;
+        }
+        s.simLastPrice = s.simPrice;
+      }
+
+      // Display price: real when connected, simulated when not
+      const displayPrice = isConnected ? s.interpPrice : s.simPrice;
+      s.displayPrice = displayPrice;
+
+      // --- Dynamic rescaling (±0.01% range, 10% edge trigger, 45-frame anim) ---
+      const visRange = s.animMax - s.animMin;
+      if (displayPrice < s.animMin + visRange * 0.10 ||
+          displayPrice > s.animMax - visRange * 0.10) {
+        const newHalf = displayPrice * VISIBLE_RANGE_PCT;
+        s.rescaleStartMin = s.animMin;
+        s.rescaleStartMax = s.animMax;
+        s.targetMin = displayPrice - newHalf;
+        s.targetMax = displayPrice + newHalf;
+        s.rescaleFrame = 0;
+      }
+      if (s.rescaleFrame < 45) {
+        s.rescaleFrame++;
+        const rt = s.rescaleFrame / 45;
+        s.animMin = lerp(s.rescaleStartMin, s.targetMin, rt);
+        s.animMax = lerp(s.rescaleStartMax, s.targetMax, rt);
+      }
+
+      // --- Price Y (chart maps to middle 35% of screen) ---
+      const priceY = mapPrice(displayPrice, s.animMin, s.animMax, H);
+
+      // Push to history; cap at shipX pixels
+      s.priceHistoryPx.push(priceY);
+      const maxHistLen = Math.floor(shipX) + 1;
+      if (s.priceHistoryPx.length > maxHistLen) {
+        s.priceHistoryPx.shift();
+      }
+
+      // --- Ship physics — two-phase acceleration ---
+      const wHeld = s.keys['w'] || s.keys['W'] || s.keys['ArrowUp'];
+      const sHeld = s.keys['s'] || s.keys['S'] || s.keys['ArrowDown'];
+
+      if (wHeld && !sHeld) {
+        if (s.wHeldFrames === 0) {
+          s.shipVelY = -INITIAL_SPEED;
+        } else {
+          s.shipVelY = lerp(s.shipVelY, -MAX_SPEED, ACCELERATION_RAMP);
+        }
+        s.wHeldFrames++;
+        s.sHeldFrames = 0;
+      } else if (sHeld && !wHeld) {
+        if (s.sHeldFrames === 0) {
+          s.shipVelY = INITIAL_SPEED;
+        } else {
+          s.shipVelY = lerp(s.shipVelY, MAX_SPEED, ACCELERATION_RAMP);
+        }
+        s.sHeldFrames++;
+        s.wHeldFrames = 0;
+      } else {
+        // Neither or both — decelerate smoothly
+        s.shipVelY = lerp(s.shipVelY, 0, 0.22);
+        s.wHeldFrames = 0;
+        s.sHeldFrames = 0;
+      }
+
+      s.shipVelY = Math.max(-MAX_SPEED, Math.min(MAX_SPEED, s.shipVelY));
+      s.shipY += s.shipVelY;
+      if (s.shipY < 60) { s.shipY = 60; s.shipVelY = 0; s.wHeldFrames = 0; s.sHeldFrames = 0; }
+      if (s.shipY > H - 60) { s.shipY = H - 60; s.shipVelY = 0; s.wHeldFrames = 0; s.sHeldFrames = 0; }
+
+      // Tilt
+      const targetTilt = Math.max(-0.55, Math.min(0.55, s.shipVelY * 0.18));
+      s.shipTiltAngle = lerp(s.shipTiltAngle, targetTilt, 0.12);
+
+      // Bob + shake (visual only)
+      s.bobPhase += 0.04;
+      const bobY = Math.sin(s.bobPhase) * 2.5;
+      const shakeOff = s.shipShake > 0 ? (Math.random() - 0.5) * 6 * (s.shipShake / 12) : 0;
+      const drawShipY = s.shipY + bobY + shakeOff;
+      if (s.shipShake > 0) s.shipShake--;
+
+      // --- Safe zone ---
+      const safeY = priceY;
+      const inSafe = Math.abs(s.shipY - safeY) <= SAFE_ZONE_HALF;
+
+      if (inSafe) {
+        s.totalZoneFrames++;
+        s.consecutiveZoneFrames++;
+        if (s.consecutiveZoneFrames > 0 && s.consecutiveZoneFrames % 60 === 0) {
+          s.totalZoneEarnings += EARNINGS_PER_SECOND;
+          engine.addZoneEarnings(EARNINGS_PER_SECOND);
+          setZoneNotif({ text: `+$${EARNINGS_PER_SECOND.toFixed(2)}`, key: Date.now() });
+          if (zoneNotifTimeout.current) clearTimeout(zoneNotifTimeout.current);
+          zoneNotifTimeout.current = setTimeout(() => setZoneNotif(null), 1700);
+
+          // Place an order for each zone earning — always uses real price
+          const order: Order = {
+            coinId: `zone-${Date.now()}`,
+            priceLevel: s.interpPrice,
+            size: EARNINGS_PER_SECOND,
+            side: s.interpPrice > s.interpPrev ? 'buy' : 'sell',
+            timestamp: Date.now(),
+            liquidOrderId: `mock-${Date.now()}`,
+          };
+          engine.addOrder(order);
+        }
+        if (s.totalZoneFrames % 60 === 0) {
+          setSecondsOnTarget(Math.floor(s.totalZoneFrames / 60));
+        }
+      } else {
+        engine.adjustHealth(-0.04);
+        s.consecutiveZoneFrames = 0;
+      }
+
+      s.shieldAlpha = inSafe
+        ? Math.min(1, s.shieldAlpha + 1 / 20)
+        : Math.max(0, s.shieldAlpha - 1 / 20);
+
+      if (inSafe && !s.wasInSafe) {
+        s.floatingTexts.push({
+          text: 'ON TARGET', x: shipX - 60, y: drawShipY - 25,
+          opacity: 1, vy: -0.5, life: 25, color: COL_SAFE, size: 10,
+        });
+      }
+      s.wasInSafe = inSafe;
+
+      // --- Asteroids ---
+      const elapsed = params.duration - engine.timeRemainingRef.current;
+      const astInterval = elapsed > 40 ? 14 : elapsed > 20 ? 20 : ASTEROID_BASE_INTERVAL;
+      s.asteroidTimer++;
+      if (s.asteroidTimer >= astInterval) {
+        s.asteroidTimer = 0;
+        let ay: number;
+        do { ay = 60 + Math.random() * (H - 120); } while (Math.abs(ay - safeY) < 80);
+        const radius = 13 + Math.random() * 11;
+        s.asteroids.push({
+          x: gameW + 20, y: ay,
+          vx: -(3 + Math.random() * 4), vy: (Math.random() - 0.5) * 1.2,
+          rotation: 0, rotSpeed: (Math.random() - 0.5) * 0.08,
+          radius, vertices: generateAsteroidVertices(radius),
+          detailOffsets: Array.from({ length: 2 }, () => ({
+            ox: (Math.random() - 0.5) * radius * 0.4,
+            oy: (Math.random() - 0.5) * radius * 0.4,
+          })),
+          glowIntensity: 0,
+        });
+      }
+
+      for (let i = s.asteroids.length - 1; i >= 0; i--) {
+        const a = s.asteroids[i];
+        a.x += a.vx; a.y += a.vy; a.rotation += a.rotSpeed;
+        if (a.y < a.radius + 10 || a.y > H - a.radius - 10) a.vy *= -1;
+        a.y = Math.max(a.radius + 10, Math.min(H - a.radius - 10, a.y));
+        if (a.x < -50) { s.asteroids.splice(i, 1); continue; }
+        if (Math.abs(a.y - safeY) < 80) { s.asteroids.splice(i, 1); continue; }
+
+        const dxa = shipX - a.x; const dya = s.shipY - a.y;
+        const distA = Math.sqrt(dxa * dxa + dya * dya);
+        a.glowIntensity = distA < 200
+          ? lerp(a.glowIntensity, (200 - distA) / 200, 0.08)
+          : lerp(a.glowIntensity, 0, 0.08);
+
+        if (distA < a.radius + 8) {
+          s.asteroids.splice(i, 1);
+          engine.takeDamage(15);
+          s.flashRed = 24; s.shipShake = 12;
+          s.flashWhite = { x: shipX, y: s.shipY, life: 10 };
+          setHitFlash(true);
+          if (hitFlashTimeout.current) clearTimeout(hitFlashTimeout.current);
+          hitFlashTimeout.current = setTimeout(() => setHitFlash(false), 400);
+          for (let p = 0; p < 12; p++) {
+            const angle = (p / 12) * Math.PI * 2;
+            const speed = 4 + Math.random() * 4;
+            s.particles.push({ x: shipX, y: s.shipY, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed, life: 14, maxLife: 14, radius: 4, color: 'rgba(255,200,200,1)' });
+          }
+        }
+      }
+
+      // --- Engine trail ---
+      const tCos = Math.cos(s.shipTiltAngle);
+      const tSin = Math.sin(s.shipTiltAngle);
+      const nacelles = [{ lx: -25, ly: -10 }, { lx: -25, ly: 10 }];
+      for (const nac of nacelles) {
+        const wx = shipX + nac.lx * tCos - nac.ly * tSin;
+        const wy = drawShipY + nac.lx * tSin + nac.ly * tCos;
+        for (let p = 0; p < 5; p++) {
+          s.particles.push({
+            x: wx + (Math.random() - 0.5) * 4,
+            y: wy + (Math.random() - 0.5) * 4,
+            vx: -(2 + Math.random() * 2) * tCos,
+            vy: -(2 + Math.random() * 2) * tSin + (Math.random() - 0.5) * 0.5,
+            life: 28, maxLife: 28, radius: 3.5, color: COL_CYAN,
+          });
+        }
+      }
+
+      // Update particles
+      for (let i = s.particles.length - 1; i >= 0; i--) {
+        const p = s.particles[i]; p.x += p.vx; p.y += p.vy; p.life--;
+        if (p.life <= 0) s.particles.splice(i, 1);
+      }
+
+      // Update floating texts
+      for (let i = s.floatingTexts.length - 1; i >= 0; i--) {
+        const ft = s.floatingTexts[i]; ft.y += ft.vy; ft.life--; ft.opacity = ft.life / 35;
+        if (ft.life <= 0) s.floatingTexts.splice(i, 1);
+      }
+
+      if (s.flashRed > 0) s.flashRed--;
+      if (s.flashWhite.life > 0) s.flashWhite.life--;
+
+      // --- PnL (always uses real/mock price, never simulated) ---
+      const pnl = engine.ordersRef.current.reduce((sum: number, order: Order) => {
+        const diff = s.interpPrice - order.priceLevel;
+        return sum + diff * order.size * (order.side === 'buy' ? 1 : -1) * 0.001;
+      }, 0);
       engine.checkGameEndConditions(pnl);
-    },
-    [engine.checkGameEndConditions],
-  );
+      if (engine.endedRef.current) return;
+
+      // =====================================================================
+      // DRAW — BACKGROUND
+      // =====================================================================
+      bgCtx.fillStyle = COL_BG;
+      bgCtx.fillRect(0, 0, W, H);
+
+      // --- Grid — covers full canvas, drawn before stars ---
+      const axisInc = displayPrice * VISIBLE_RANGE_PCT * 0.25;
+      const priceAxisYs: number[] = [];
+      if (axisInc > 0) {
+        const start = Math.ceil(s.animMin / axisInc) * axisInc;
+        for (let p = start; p <= s.animMax; p += axisInc) {
+          priceAxisYs.push(mapPrice(p, s.animMin, s.animMax, H));
+        }
+      }
+
+      bgCtx.lineWidth = 1;
+
+      for (let gy = 0; gy <= H; gy += 72) {
+        let isPriceLevel = false;
+        for (const py of priceAxisYs) {
+          if (Math.abs(gy - py) < 4) { isPriceLevel = true; break; }
+        }
+        bgCtx.strokeStyle = isPriceLevel ? 'rgba(255,255,255,0.048)' : 'rgba(255,255,255,0.022)';
+        bgCtx.beginPath(); bgCtx.moveTo(0, gy); bgCtx.lineTo(W, gy); bgCtx.stroke();
+      }
+
+      s.gridOffsetX = (s.gridOffsetX + 0.4) % 72;
+      bgCtx.strokeStyle = 'rgba(255,255,255,0.022)';
+      for (let gx = -s.gridOffsetX; gx <= W; gx += 72) {
+        bgCtx.beginPath(); bgCtx.moveTo(gx, 0); bgCtx.lineTo(gx, H); bgCtx.stroke();
+      }
+
+      // Stars
+      for (const star of s.stars) {
+        let alpha = star.baseA;
+        if (star.twinkle) alpha *= 0.5 + 0.5 * Math.sin(frame / 60 * Math.PI * 2 / star.period + star.phase);
+        bgCtx.beginPath(); bgCtx.arc(star.x, star.y, star.r, 0, Math.PI * 2);
+        bgCtx.fillStyle = `rgba(255,255,255,${alpha})`; bgCtx.fill();
+      }
+
+      bgCtx.fillStyle = 'rgba(0,0,0,0.06)';
+      for (let sy = 0; sy < H; sy += 3) bgCtx.fillRect(0, sy, W, 1);
+
+      s.scanX = (frame % 300) / 300 * W;
+      const grad = bgCtx.createLinearGradient(s.scanX - 30, 0, s.scanX + 30, 0);
+      grad.addColorStop(0, 'rgba(180,80,160,0)');
+      grad.addColorStop(0.5, 'rgba(180,80,160,0.04)');
+      grad.addColorStop(1, 'rgba(180,80,160,0)');
+      bgCtx.fillStyle = grad; bgCtx.fillRect(s.scanX - 30, 0, 60, H);
+
+      // =====================================================================
+      // DRAW — GAME CANVAS
+      // =====================================================================
+      ctx.clearRect(0, 0, W, H);
+
+      // --- Price line ---
+      const hist = s.priceHistoryPx;
+      if (hist.length >= 2) {
+        const xOff = shipX - hist.length + 1;
+        const buildPath = () => {
+          ctx.beginPath();
+          ctx.moveTo(xOff, hist[0]);
+          for (let i = 1; i < hist.length; i++) ctx.lineTo(xOff + i, hist[i]);
+        };
+
+        ctx.save();
+        ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+
+        ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(160, 120, 200, 0.1)';
+        buildPath(); ctx.stroke();
+
+        ctx.lineWidth = 5; ctx.strokeStyle = COL_LINE_GLOW;
+        ctx.globalAlpha = 0.35;
+        buildPath(); ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        ctx.lineWidth = 2; ctx.strokeStyle = COL_LINE;
+        ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(200, 180, 255, 0.7)';
+        buildPath(); ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.restore();
+
+        const fillDepth = (H - 160) * 0.04;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(xOff, hist[0]);
+        for (let i = 1; i < hist.length; i++) ctx.lineTo(xOff + i, hist[i]);
+        for (let i = hist.length - 1; i >= 0; i--) ctx.lineTo(xOff + i, hist[i] + fillDepth);
+        ctx.closePath();
+        const fillGrad = ctx.createLinearGradient(0, priceY, 0, priceY + fillDepth);
+        fillGrad.addColorStop(0, 'rgba(160, 100, 200, 0.18)');
+        fillGrad.addColorStop(1, 'rgba(160, 100, 200, 0)');
+        ctx.fillStyle = fillGrad; ctx.fill();
+        ctx.restore();
+      }
+
+      // --- Darkness wall ---
+      ctx.fillStyle = COL_BG;
+      ctx.fillRect(shipX, 0, gameW - shipX, H);
+      const darkGrad = ctx.createLinearGradient(shipX - 24, 0, shipX, 0);
+      darkGrad.addColorStop(0, 'rgba(13, 8, 22, 0)');
+      darkGrad.addColorStop(1, 'rgba(13, 8, 22, 1)');
+      ctx.fillStyle = darkGrad; ctx.fillRect(shipX - 24, 0, 24, H);
+
+      ctx.fillStyle = 'rgba(8, 8, 20, 0.6)';
+      ctx.fillRect(gameW, 0, W - gameW - PRICE_AXIS_W, H);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(gameW, 0); ctx.lineTo(gameW, H); ctx.stroke();
+
+      // --- Current price dashed line ---
+      ctx.save();
+      ctx.setLineDash([4, 4]);
+      ctx.strokeStyle = 'rgba(200, 180, 240, 0.2)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, priceY); ctx.lineTo(W - PRICE_AXIS_W, priceY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // --- Safe zone ---
+      const safeTop = safeY - SAFE_ZONE_HALF;
+      const safeBot = safeY + SAFE_ZONE_HALF;
+      ctx.save();
+      const sineOsc = Math.sin(frame / 60 * Math.PI * 2 / 3) * 0.02;
+      ctx.globalAlpha = 1 + sineOsc;
+      ctx.fillStyle = inSafe ? 'rgba(0, 255, 150, 0.07)' : 'rgba(0, 255, 150, 0.04)';
+      ctx.fillRect(0, safeTop, gameW, safeBot - safeTop);
+      ctx.restore();
+
+      const dashOff = (frame * 1.2) % 24;
+      ctx.save();
+      ctx.setLineDash([14, 10]); ctx.lineDashOffset = -dashOff;
+      ctx.strokeStyle = 'rgba(0, 255, 150, 0.25)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, safeTop); ctx.lineTo(gameW, safeTop); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, safeBot); ctx.lineTo(gameW, safeBot); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      const bPulse = 0.5 + 0.5 * Math.sin(frame / 60 * Math.PI * 2 / 1.5);
+      ctx.save();
+      ctx.strokeStyle = `rgba(0, 255, 150, ${0.5 + bPulse * 0.5})`;
+      ctx.lineWidth = 1.5;
+      if (inSafe) { ctx.shadowBlur = 4; ctx.shadowColor = COL_SAFE; }
+      ctx.beginPath(); ctx.moveTo(shipX - 8, safeTop); ctx.lineTo(shipX, safeTop); ctx.lineTo(shipX, safeTop + 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(shipX + 8, safeTop); ctx.lineTo(shipX, safeTop); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(shipX - 8, safeBot); ctx.lineTo(shipX, safeBot); ctx.lineTo(shipX, safeBot - 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(shipX + 8, safeBot); ctx.lineTo(shipX, safeBot); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+
+      // --- Asteroids ---
+      for (const a of s.asteroids) {
+        ctx.save(); ctx.translate(a.x, a.y); ctx.rotate(a.rotation);
+        if (a.glowIntensity > 0.01) {
+          ctx.beginPath();
+          ctx.moveTo(a.vertices[0].x * 1.5, a.vertices[0].y * 1.5);
+          for (let v = 1; v < a.vertices.length; v++) ctx.lineTo(a.vertices[v].x * 1.5, a.vertices[v].y * 1.5);
+          ctx.closePath();
+          ctx.fillStyle = `rgba(200, 80, 60, ${a.glowIntensity * 0.25})`; ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.moveTo(a.vertices[0].x, a.vertices[0].y);
+        for (let v = 1; v < a.vertices.length; v++) ctx.lineTo(a.vertices[v].x, a.vertices[v].y);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(55, 55, 68, 1)'; ctx.fill();
+        ctx.fillStyle = 'rgba(200, 80, 60, 0.12)'; ctx.fill();
+        ctx.strokeStyle = 'rgba(130, 130, 148, 0.85)'; ctx.lineWidth = 1; ctx.stroke();
+        for (const d of a.detailOffsets) {
+          ctx.beginPath();
+          for (let v = 0; v < a.vertices.length; v++) {
+            const px = a.vertices[v].x * 0.35 + d.ox; const py = a.vertices[v].y * 0.35 + d.oy;
+            if (v === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+          }
+          ctx.closePath(); ctx.fillStyle = 'rgba(40, 40, 52, 1)'; ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // Off-screen arrows
+      for (const a of s.asteroids) {
+        const dx = Math.abs(a.x - shipX);
+        if (dx < 220 && (a.y < 10 || a.y > H - 10)) {
+          const arrowY = a.y < 10 ? 15 : H - 15;
+          const pointing = a.y < 10 ? -1 : 1;
+          const pulse = 0.35 + 0.5 * Math.abs(Math.sin(frame / 60 * Math.PI * 2 / 0.6));
+          ctx.save(); ctx.fillStyle = `rgba(180, 100, 80, ${pulse})`;
+          ctx.beginPath();
+          ctx.moveTo(shipX, arrowY + pointing * 12);
+          ctx.lineTo(shipX - 4.5, arrowY); ctx.lineTo(shipX + 4.5, arrowY);
+          ctx.closePath(); ctx.fill(); ctx.restore();
+        }
+      }
+
+      // --- Ship ---
+      ctx.save(); ctx.translate(shipX, drawShipY); ctx.rotate(s.shipTiltAngle);
+      drawShip(ctx, frame);
+      if (s.shieldAlpha > 0.01) {
+        const shieldCol = engine.healthRef.current < 30
+          ? `rgba(255, 60, 60, ${0.55 * s.shieldAlpha})`
+          : `rgba(0, 255, 150, ${0.55 * s.shieldAlpha})`;
+        ctx.strokeStyle = shieldCol; ctx.lineWidth = 1;
+        const sr = frame * 0.018;
+        for (let seg = 0; seg < 4; seg++) {
+          const sa = sr + seg * Math.PI / 2 + 0.09;
+          ctx.beginPath(); ctx.arc(0, 0, 28, sa, sa + Math.PI / 2 - 0.18); ctx.stroke();
+        }
+      }
+      ctx.restore();
+
+      // --- Particles ---
+      for (const p of s.particles) {
+        const alpha = p.life / p.maxLife; const r = p.radius * alpha;
+        ctx.save(); ctx.globalAlpha = alpha;
+        ctx.shadowBlur = 4; ctx.shadowColor = p.color;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = p.color; ctx.fill();
+        ctx.shadowBlur = 0; ctx.restore();
+      }
+
+      // --- Floating texts ---
+      for (const ft of s.floatingTexts) {
+        ctx.save(); ctx.globalAlpha = Math.max(0, ft.opacity);
+        ctx.font = `bold ${ft.size}px 'Space Mono', monospace`;
+        ctx.fillStyle = ft.color; ctx.textAlign = 'center';
+        ctx.fillText(ft.text, ft.x, ft.y); ctx.restore();
+      }
+
+      // --- Flash effects ---
+      if (s.flashRed > 0) {
+        ctx.save(); ctx.globalAlpha = (s.flashRed / 24) * 0.22;
+        ctx.fillStyle = 'rgba(255, 30, 30, 1)'; ctx.fillRect(0, 0, W, H); ctx.restore();
+      }
+      if (s.flashWhite.life > 0) {
+        ctx.save(); ctx.globalAlpha = (s.flashWhite.life / 10) * 0.35;
+        ctx.beginPath(); ctx.arc(s.flashWhite.x, s.flashWhite.y, 36, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,1)'; ctx.fill(); ctx.restore();
+      }
+
+      animFrameRef.current = requestAnimationFrame(tick);
+    }
+
+    animFrameRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animFrameRef.current);
+  }, [engine.gameStatus]);
+
+  // =========================================================================
+  // Price axis data — labels at VISIBLE_RANGE_PCT * 0.25 increments
+  // =========================================================================
+  const s = stateRef.current;
+  const dp = s.displayPrice || currentPrice || SEED_PRICE;
+  const aMin = s.animMin || dp - dp * VISIBLE_RANGE_PCT;
+  const aMax = s.animMax || dp + dp * VISIBLE_RANGE_PCT;
+  const axisH = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const currentPriceY = mapPrice(dp, aMin, aMax, axisH);
+
+  const inc = dp * VISIBLE_RANGE_PCT * 0.25;
+  const axisLabels: { price: number; y: number }[] = [];
+  if (inc > 0) {
+    const start = Math.ceil(aMin / inc) * inc;
+    for (let p = start; p <= aMax; p += inc) {
+      const y = mapPrice(p, aMin, aMax, axisH);
+      if (Math.abs(y - currentPriceY) > 20) {
+        axisLabels.push({ price: p, y });
+      }
+    }
+  }
+
+  const fmtPrice = (p: number) =>
+    p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div className="relative w-full h-full">
-      <Canvas
-        camera={{ position: [0, 0, 10], fov: 60 }}
-        style={{ background: '#0d1f2d' }}
-      >
-        <Scene
-          currentPrice={currentPrice}
-          previousPrice={previousPrice}
-          priceDirection={priceDirection}
-          gameStatus={engine.gameStatus}
-          ordersPlaced={engine.ordersPlaced}
-          onCollectCoin={handleCollectCoin}
-          onCheckEnd={handleCheckEnd}
-        />
-      </Canvas>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
+      <canvas ref={bgCanvasRef} style={{ position: 'absolute', inset: 0, zIndex: 0 }} />
+      <canvas ref={gameCanvasRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
 
-      {/* HUD overlay with live engine data */}
       <HUD
         currentPrice={currentPrice}
+        previousPrice={previousPrice}
+        priceDirection={priceDirection}
         timeRemaining={engine.timeRemaining}
-        coinsCollected={engine.coinsCollected.length}
-        ordersPlaced={engine.ordersPlaced.length}
+        secondsOnTarget={secondsOnTarget}
+        totalPlaced={engine.ordersPlaced.reduce((sum, o) => sum + o.size, 0)}
         estimatedPnL={engine.totalPnL}
-        params={params}
+        health={engine.health}
+        hitFlash={hitFlash}
+        zoneNotification={zoneNotif}
       />
 
+      {/* Price axis */}
+      <div style={{
+        position: 'absolute', top: 0, right: 0,
+        width: PRICE_AXIS_W, height: '100%',
+        background: 'rgba(10, 10, 18, 0.97)',
+        borderLeft: '1px solid rgba(255, 255, 255, 0.08)',
+        fontFamily: "'Space Mono', monospace",
+        fontSize: 11, zIndex: 10,
+      }}>
+        {axisLabels.map((label, i) => (
+          <div key={i} style={{
+            position: 'absolute',
+            top: label.y - 7,
+            right: 10,
+            color: 'rgba(180, 180, 190, 0.75)',
+            whiteSpace: 'nowrap',
+          }}>
+            {fmtPrice(label.price)}
+            <div style={{
+              position: 'absolute', left: -14, top: 6,
+              width: 4, height: 1,
+              background: 'rgba(255,255,255,0.2)',
+            }} />
+          </div>
+        ))}
+
+        {/* Current price pill */}
+        <div style={{
+          position: 'absolute',
+          top: currentPriceY - 10,
+          left: 0, right: 0,
+          display: 'flex', justifyContent: 'center',
+        }}>
+          <span style={{
+            background: 'rgba(0, 220, 255, 1)',
+            color: '#000', fontWeight: 'bold',
+            borderRadius: 2, padding: '2px 6px',
+            fontSize: 11, whiteSpace: 'nowrap',
+          }}>
+            {fmtPrice(dp)}
+          </span>
+        </div>
+      </div>
+
       {!isConnected && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 text-xs text-retro-orange bg-black/70 px-3 py-1 rounded">
+        <div style={{
+          position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+          fontSize: 11, color: 'rgba(0, 220, 255, 0.65)', background: 'rgba(6,8,24,0.9)',
+          padding: '4px 12px', borderRadius: 4, zIndex: 20,
+        }}>
           Connecting to price feed...
         </div>
       )}

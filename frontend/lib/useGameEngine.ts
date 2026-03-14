@@ -15,7 +15,7 @@ import type { Coin, GameEndReason, GameParams, GameResult, GameStatus, Order } f
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ORDER_SIZE = 0.001;
+const DEFAULT_ORDER_SIZE_USD = 10;
 export const MIN_Y = -5;
 export const MAX_Y = 5;
 
@@ -104,7 +104,7 @@ export function useGameEngine(params: GameParams) {
     const order: Order = {
       coinId: coin.id,
       priceLevel: coin.priceLevel,
-      size: DEFAULT_ORDER_SIZE,
+      size: DEFAULT_ORDER_SIZE_USD,
       side,
       timestamp: Date.now(),
       liquidOrderId: `mock-${Date.now()}`,

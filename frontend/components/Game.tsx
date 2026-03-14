@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useLiquid } from '@/lib/useLiquid';
 import { useGameEngine } from '@/lib/useGameEngine';
 import HUD from './HUD';
 import type { GameParams, GameResult, Order } from '@/types';
@@ -24,8 +23,15 @@ const SAFE_ZONE_HALF = 32;
 const ASTEROID_BASE_INTERVAL = 28;
 const GAME_AREA_PCT = 0.75;
 const PRICE_AXIS_W = 68;
-// Chart range — tight enough to see tick-level moves, auto-rescales on breakout
-const VISIBLE_RANGE_PCT = 0.0005;
+// Chart range — per-asset so tick-level moves are visible
+// Lower price assets need tighter pct to amplify small absolute moves
+const VISIBLE_RANGE_MAP: Record<string, number> = {
+  'BTC-PERP': 0.0003,   // ±$25 at ~$84k
+  'ETH-PERP': 0.0005,   // ±$1 at ~$2k
+  'SOL-PERP': 0.001,    // ±$0.13 at ~$130
+  'DOGE-PERP': 0.0003,  // ±$0.00003 at ~$0.095
+};
+const DEFAULT_VISIBLE_RANGE_PCT = 0.0005;
 const CHART_HEIGHT_FRACTION = 0.6;
 
 // Colors
@@ -142,16 +148,25 @@ function drawShip(ctx: CanvasRenderingContext2D, frame: number) {
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
+interface PriceData {
+  currentPrice: number;
+  previousPrice: number;
+  priceDirection: 'up' | 'down' | 'neutral';
+  isConnected: boolean;
+}
+
 interface GameProps {
   params: GameParams;
+  priceData: PriceData;
   onGameEnd: (result: GameResult) => void;
 }
 
-export default function Game({ params, onGameEnd }: GameProps) {
-  const { currentPrice, previousPrice, priceDirection, isConnected } = useLiquid(params.symbol);
+export default function Game({ params, priceData, onGameEnd }: GameProps) {
+  const { currentPrice, previousPrice, priceDirection, isConnected } = priceData;
   const engine = useGameEngine(params);
   const [tradeLog, setTradeLog] = useState<TradeLogEntry[]>([]);
   const [livePrice, setLivePrice] = useState(0);
+  const VISIBLE_RANGE_PCT = VISIBLE_RANGE_MAP[params.symbol] ?? DEFAULT_VISIBLE_RANGE_PCT;
 
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const gameCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -348,13 +363,13 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
       // --- Interpolate real/mock price ---
       s.interpFrame++;
-      const interpT = Math.min(s.interpFrame / 10, 1);
+      const interpT = Math.min(s.interpFrame / 4, 1);
       s.interpPrice = lerp(s.interpPrev, s.interpTarget, interpT);
 
       // Display price — always real WS data (game won't start without connection)
       const displayPrice = s.interpPrice;
       s.displayPrice = displayPrice;
-      if (frame % 6 === 0) setLivePrice(displayPrice);
+      if (frame % 3 === 0) setLivePrice(displayPrice);
 
       // --- Dynamic rescaling (±0.01% range, 10% edge trigger, 45-frame anim) ---
       const visRange = s.animMax - s.animMin;
@@ -795,15 +810,16 @@ export default function Game({ params, onGameEnd }: GameProps) {
   // Price axis data — labels at VISIBLE_RANGE_PCT * 0.25 increments
   // =========================================================================
   const s = stateRef.current;
-  const dp = s.displayPrice || currentPrice;
+  const dp = s.displayPrice || currentPrice || 1;
   const aMin = s.animMin || dp - dp * VISIBLE_RANGE_PCT;
   const aMax = s.animMax || dp + dp * VISIBLE_RANGE_PCT;
   const axisH = typeof window !== 'undefined' ? window.innerHeight : 800;
-  const currentPriceY = mapPrice(dp, aMin, aMax, axisH);
+  const hasPrice = dp > 1 && aMax > aMin;
+  const currentPriceY = hasPrice ? mapPrice(dp, aMin, aMax, axisH) : axisH / 2;
 
   const inc = dp * VISIBLE_RANGE_PCT * 0.25;
   const axisLabels: { price: number; y: number }[] = [];
-  if (inc > 0) {
+  if (hasPrice && inc > 0) {
     const start = Math.ceil(aMin / inc) * inc;
     for (let p = start; p <= aMax; p += inc) {
       const y = mapPrice(p, aMin, aMax, axisH);

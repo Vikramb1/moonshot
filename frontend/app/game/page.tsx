@@ -4,12 +4,13 @@
  * Game page — /game
  *
  * Reads GameParams from URL, runs countdown, renders game, shows results.
- * Countdown is owned here; startGame() on engine is called after countdown.
+ * WS connection starts immediately so price data is ready when game begins.
  */
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
+import { useLiquid } from '@/lib/useLiquid';
 import type { GameParams, GameResult, TradingSymbol } from '@/types';
 
 const Game = dynamic(() => import('@/components/Game'), { ssr: false });
@@ -23,9 +24,10 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
   const rawLoss = searchParams.get('lossThreshold');
   const lossThreshold = rawLoss ? parseFloat(rawLoss) : null;
   const rawPos = searchParams.get('positionSize');
-  const positionSize = rawPos ? Math.max(0.5, parseFloat(rawPos)) : 100;
+  const positionSize = rawPos ? Math.max(0.5, parseFloat(rawPos)) : 0.5;
   const rawSymbol = searchParams.get('symbol');
-  const symbol: TradingSymbol = (rawSymbol === 'BTC-PERP' || rawSymbol === 'SOL-PERP') ? rawSymbol : 'ETH-PERP';
+  const validSymbols: TradingSymbol[] = ['ETH-PERP', 'BTC-PERP', 'SOL-PERP', 'DOGE-PERP'];
+  const symbol: TradingSymbol = validSymbols.includes(rawSymbol as TradingSymbol) ? rawSymbol as TradingSymbol : 'ETH-PERP';
   const useLive = searchParams.get('useLive') === '1';
   return { duration, profitThreshold, lossThreshold, positionSize, symbol, useLive };
 }
@@ -33,6 +35,9 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
 function GamePageInner() {
   const searchParams = useSearchParams();
   const gameParams = parseGameParams(searchParams);
+
+  // Start WS connection immediately — ready before countdown finishes
+  const priceData = useLiquid(gameParams.symbol);
 
   const [gameStatus, setGameStatus] = useState<'countdown' | 'playing' | 'ended'>('countdown');
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
@@ -62,6 +67,7 @@ function GamePageInner() {
       {gameStatus === 'playing' && (
         <Game
           params={gameParams}
+          priceData={priceData}
           onGameEnd={(result) => {
             setGameResult(result);
             setGameStatus('ended');
@@ -73,14 +79,26 @@ function GamePageInner() {
       {gameStatus === 'countdown' && (
         <div className="absolute inset-0 z-20 flex items-center justify-center">
           <div className="starfield" />
-          <span
-            className="relative z-10 text-6xl md:text-8xl text-retro-white"
-            style={{
-              textShadow: '0 0 40px rgba(224, 96, 48, 0.8), 0 4px 0 #b84820',
-            }}
-          >
-            {countdownValue > 0 ? countdownValue : 'GO!'}
-          </span>
+          <div className="relative z-10 flex flex-col items-center gap-4">
+            <span
+              className="text-6xl md:text-8xl text-retro-white"
+              style={{
+                textShadow: '0 0 40px rgba(224, 96, 48, 0.8), 0 4px 0 #b84820',
+              }}
+            >
+              {countdownValue > 0 ? countdownValue : 'GO!'}
+            </span>
+            {!priceData.isConnected && (
+              <span className="text-xs text-cyan-400/60">
+                Connecting to {gameParams.symbol.replace('-PERP', '')} price feed...
+              </span>
+            )}
+            {priceData.isConnected && priceData.currentPrice > 0 && (
+              <span className="text-xs text-green-400/60">
+                {gameParams.symbol.replace('-PERP', '')} ${priceData.currentPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </span>
+            )}
+          </div>
         </div>
       )}
 

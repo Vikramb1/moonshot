@@ -17,7 +17,7 @@ export default function LobbyPage() {
   const { currentPrice, isConnected } = useLiquid(symbol);
 
   const [duration, setDuration] = useState<30 | 60>(60);
-  const [positionSize, setPositionSize] = useState<string>('100');
+  const [positionSize, setPositionSize] = useState<string>('0.5');
   const [useLive, setUseLive] = useState(false);
 
   function buildSummary(): string {
@@ -61,7 +61,7 @@ export default function LobbyPage() {
               Asset
             </label>
             <div className="flex gap-3">
-              {(['ETH-PERP', 'BTC-PERP', 'SOL-PERP'] as const).map((s) => (
+              {(['ETH-PERP', 'BTC-PERP', 'SOL-PERP', 'DOGE-PERP'] as const).map((s) => (
                 <button
                   key={s}
                   onClick={() => setSymbol(s)}

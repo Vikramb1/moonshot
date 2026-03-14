@@ -13,10 +13,12 @@ Auth:            HMAC-SHA256 (handled by LiquidClient automatically)
 import asyncio
 import hashlib
 import hmac
+import json
 import os
 import time
 import uuid
 
+import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -204,8 +206,9 @@ class TradeRequest(BaseModel):
 
 @app.post("/api/trade")
 async def trade(body: TradeRequest):
-    """Place a market trade, auto-close after 1 second."""
+    """Place a market trade, then immediately close with opposite order."""
     order_side = "buy" if body.side == "long" else "sell"
+    close_side = "sell" if body.side == "long" else "buy"
 
     try:
         order = liquid.place_order(
@@ -219,11 +222,30 @@ async def trade(body: TradeRequest):
         return {"success": False, "error": str(exc)}
 
     async def close_after_delay():
-        await asyncio.sleep(0.1)
+        """Close this specific trade by placing an opposite market order of the same size."""
+        await asyncio.sleep(0.5)
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                liquid.place_order(
+                    symbol=body.symbol,
+                    side=close_side,
+                    type="market",
+                    size=body.size,
+                    leverage=body.leverage,
+                )
+                print(f"[trade] closed {body.side} {body.size} {body.symbol}")
+                return
+            except Exception as exc:
+                print(f"[trade] close attempt {attempt + 1}/{max_retries} failed: {exc}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1.0)
+        # Last resort: try close_position
         try:
             liquid.close_position(body.symbol)
+            print(f"[trade] fallback close_position {body.symbol}")
         except Exception as exc:
-            print(f"[trade] failed to close {body.symbol}: {exc}")
+            print(f"[trade] FAILED to close {body.symbol}: {exc}")
 
     asyncio.create_task(close_after_delay())
 
@@ -233,56 +255,107 @@ async def trade(body: TradeRequest):
         "side": body.side,
         "size": body.size,
         "symbol": body.symbol,
-        "closes_in_ms": 100,
+        "closes_in_ms": 500,
     }
 
 
+@app.post("/api/close-all")
+async def close_all():
+    """Emergency close all positions for all supported symbols."""
+    results = []
+    for sym in ["ETH-PERP", "BTC-PERP", "SOL-PERP", "DOGE-PERP"]:
+        try:
+            liquid.close_position(sym)
+            results.append({"symbol": sym, "closed": True})
+        except Exception as exc:
+            results.append({"symbol": sym, "closed": False, "error": str(exc)})
+    return {"results": results}
+
+
 # ---------------------------------------------------------------------------
-# Legacy price polling WebSocket (used by useLiquid hook)
+# Real-time price WebSocket — powered by Hyperliquid allMids stream
+# Orders still go through Liquid; only the price feed uses Hyperliquid.
 # ---------------------------------------------------------------------------
 
-POLL_INTERVAL_SECONDS = 1.0
+HYPERLIQUID_WS_URL = "wss://api.hyperliquid.xyz/ws"
+
+# Map our symbol names to Hyperliquid coin names
+SYMBOL_TO_HL_COIN: dict[str, str] = {
+    "ETH-PERP": "ETH",
+    "BTC-PERP": "BTC",
+    "SOL-PERP": "SOL",
+    "DOGE-PERP": "DOGE",
+}
 
 
 @app.websocket("/ws/price/{symbol}")
 async def price_websocket(ws: WebSocket, symbol: str):
-    """Poll ticker every 1s and stream PriceUpdate JSON to frontend."""
+    """
+    Stream real-time mid prices from Hyperliquid's allMids WebSocket.
+    Sub-second updates — no polling, no rate limits.
+    """
     await ws.accept()
 
+    coin = SYMBOL_TO_HL_COIN.get(symbol, symbol.replace("-PERP", ""))
     previous_price: float = 0.0
     running = True
 
-    async def poll_and_push():
-        nonlocal previous_price
+    async def stream_from_hyperliquid():
+        nonlocal previous_price, running
         while running:
             try:
-                ticker = liquid.get_ticker(symbol)
-                current_price = float(ticker.mark_price)
+                async with websockets.connect(HYPERLIQUID_WS_URL) as hl_ws:
+                    # Subscribe to allMids
+                    await hl_ws.send(json.dumps({
+                        "method": "subscribe",
+                        "subscription": {"type": "allMids"},
+                    }))
+                    print(f"[ws/price] connected to Hyperliquid allMids for {coin}")
 
-                if previous_price == 0.0:
-                    direction = "neutral"
-                elif current_price > previous_price:
-                    direction = "up"
-                elif current_price < previous_price:
-                    direction = "down"
-                else:
-                    direction = "neutral"
+                    async for raw_msg in hl_ws:
+                        if not running:
+                            break
+                        try:
+                            msg = json.loads(raw_msg)
+                        except json.JSONDecodeError:
+                            continue
 
-                update = {
-                    "price": current_price,
-                    "previousPrice": previous_price,
-                    "direction": direction,
-                    "timestamp": int(time.time() * 1000),
-                }
-                previous_price = current_price
-                await ws.send_json(update)
+                        # Skip subscription confirmation
+                        if msg.get("channel") != "allMids":
+                            continue
+
+                        mids = msg.get("data", {}).get("mids", {})
+                        price_str = mids.get(coin)
+                        if price_str is None:
+                            continue
+
+                        current_price = float(price_str)
+                        if current_price == previous_price:
+                            continue
+
+                        if previous_price == 0.0:
+                            direction = "neutral"
+                        elif current_price > previous_price:
+                            direction = "up"
+                        else:
+                            direction = "down"
+
+                        update = {
+                            "price": current_price,
+                            "previousPrice": previous_price,
+                            "direction": direction,
+                            "timestamp": int(time.time() * 1000),
+                        }
+                        previous_price = current_price
+                        await ws.send_json(update)
 
             except WebSocketDisconnect:
+                running = False
                 return
             except Exception as exc:
-                print(f"[ws/price] poll error: {exc}")
-
-            await asyncio.sleep(POLL_INTERVAL_SECONDS)
+                print(f"[ws/price] Hyperliquid connection error: {exc}")
+                if running:
+                    await asyncio.sleep(1.0)  # Brief pause before reconnect
 
     async def wait_for_disconnect():
         try:
@@ -294,7 +367,7 @@ async def price_websocket(ws: WebSocket, symbol: str):
     try:
         done, pending = await asyncio.wait(
             [
-                asyncio.ensure_future(poll_and_push()),
+                asyncio.ensure_future(stream_from_hyperliquid()),
                 asyncio.ensure_future(wait_for_disconnect()),
             ],
             return_when=asyncio.FIRST_COMPLETED,

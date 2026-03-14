@@ -18,6 +18,7 @@ import os
 import time
 import uuid
 
+import anthropic
 import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -383,3 +384,171 @@ async def price_websocket(ws: WebSocket, symbol: str):
             await ws.close()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Custom game theme generation via Claude
+# ---------------------------------------------------------------------------
+
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+
+class GenerateThemeRequest(BaseModel):
+    avatar_description: str
+    background_description: str
+    obstacle_description: str
+
+
+THEME_SYSTEM_PROMPT = """You are a Canvas 2D pixel artist. Output ONLY raw JSON, no markdown fences, no explanation.
+
+You will receive three descriptions (avatar, background, obstacle) and must produce JSON with:
+- drawAvatar: function body string for (ctx, frame, tilt) => void
+- drawObstacle: function body string for (ctx, obstacle, frame) => void
+- drawBackground: function body string for (bgCtx, W, H, frame) => void
+- colors: { bg, bgTop, line, lineGlow, safe, accent, particle, damageParticle }
+- labels: { healthLabel, onTargetText, damageText, countdownGo }
+
+CRITICAL COLOR RULES:
+- bg and bgTop MUST be dark colors (brightness < 40). Never use light, white, or bright backgrounds.
+- line and lineGlow MUST contrast strongly against the background. If bg is dark blue, line should be bright green/cyan/white. NEVER use yellow/light line on yellow/light background.
+- accent should be a vibrant, saturated color that pops against the dark background.
+- safe should be a semi-transparent color visible against the background.
+- All rgba() values must have proper alpha. Use "rgba(r, g, b, alpha)" format.
+
+IMPORTANT DRAWING CONSTRAINTS:
+- Use ONLY ctx.* / bgCtx.* Canvas 2D API calls. No images, no external resources, no fetch, no URL, no Image().
+- drawAvatar: draw at origin (0,0). The caller does ctx.translate + ctx.rotate. Use `frame` for animation (bobbing, glowing). Use `tilt` for leaning. Stay within ~40px radius.
+- drawObstacle: `obstacle` has {x, y, radius, phase, phaseSpeed, glowIntensity}. You MUST translate to obstacle.x, obstacle.y yourself. Use frame for animation. Make it look menacing with glows and shadows.
+- drawBackground: fill the full W x H area. Use gradients, subtle animated elements (use frame). Create atmosphere.
+
+CRITICAL — VISUAL ACCURACY:
+- Draw the EXACT object described. If the user says "banana", draw a recognizable curved yellow banana shape with brown tips and spots. If they say "Mario kart racer", draw a character in a kart with a red cap.
+- Be LITERAL and DETAILED. Use multiple ctx.beginPath() calls for different parts. Use arc(), quadraticCurveTo(), bezierCurveTo() for organic shapes.
+- Each obstacle/avatar should have 15-30+ canvas drawing calls minimum for good detail.
+- Use gradients, shadows, multiple layered shapes. Include subtle animation (bobbing, glowing, rotating parts).
+- All color values must be valid CSS color strings.
+- labels.healthLabel: a thematic word for health (e.g. "SHIELD", "HULL", "ENERGY")
+- labels.onTargetText: shown when player is in safe zone (e.g. "ON TARGET", "IN THE ZONE")
+- labels.damageText: shown on big hit (e.g. "OUCH!", "HULL BREACH")
+- labels.countdownGo: shown after 3-2-1 countdown (e.g. "GO!", "LAUNCH!")
+
+QUALITY REFERENCE — here is a well-drawn surfer avatar:
+```
+function drawSurfer(ctx, frame, tilt) {
+  ctx.save();
+  ctx.rotate(tilt * 0.3);
+  const boardGrad = ctx.createLinearGradient(-18, 0, 18, 0);
+  boardGrad.addColorStop(0, '#c8a050');
+  boardGrad.addColorStop(0.5, '#e0c070');
+  boardGrad.addColorStop(1, '#c8a050');
+  ctx.fillStyle = boardGrad;
+  ctx.beginPath();
+  ctx.ellipse(0, 6, 22, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+  const bobOff = Math.sin(frame * 0.08) * 1.5;
+  ctx.fillStyle = 'rgba(40, 80, 120, 1)';
+  ctx.fillRect(-6, -2 + bobOff, 4, 8);
+  ctx.fillRect(2, -2 + bobOff, 4, 8);
+  ctx.fillStyle = 'rgba(20, 60, 100, 1)';
+  ctx.fillRect(-5, -12 + bobOff, 10, 12);
+  ctx.fillStyle = 'rgba(210, 170, 130, 1)';
+  ctx.beginPath();
+  ctx.arc(0, -16 + bobOff, 5, 0, Math.PI * 2);
+  ctx.fill();
+  const armAngle = tilt * 2;
+  ctx.strokeStyle = 'rgba(210, 170, 130, 1)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(-5, -8 + bobOff); ctx.lineTo(-14 - armAngle * 3, -6 + bobOff); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(5, -8 + bobOff); ctx.lineTo(14 + armAngle * 3, -6 + bobOff); ctx.stroke();
+}
+```
+
+And a well-drawn shark obstacle:
+```
+function drawShark(ctx, shark, frame) {
+  ctx.save();
+  ctx.translate(shark.x, shark.y);
+  const undulate = Math.sin(frame * 0.06 + shark.phase) * 3;
+  if (shark.glowIntensity > 0.01) {
+    const glowGrad = ctx.createRadialGradient(0, 0, shark.radius * 0.3, 0, 0, shark.radius * 1.5);
+    glowGrad.addColorStop(0, 'rgba(200, 80, 60, ' + (shark.glowIntensity * 0.3) + ')');
+    glowGrad.addColorStop(1, 'rgba(200, 80, 60, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(-shark.radius * 1.5, -shark.radius * 1.5, shark.radius * 3, shark.radius * 3);
+  }
+  ctx.fillStyle = 'rgba(90, 100, 110, 1)';
+  ctx.beginPath();
+  ctx.moveTo(shark.radius, undulate);
+  ctx.quadraticCurveTo(shark.radius * 0.4, -shark.radius * 0.5 + undulate, 0, undulate * 0.5);
+  ctx.quadraticCurveTo(-shark.radius * 0.6, shark.radius * 0.3 + undulate, -shark.radius, undulate);
+  ctx.quadraticCurveTo(-shark.radius * 0.6, -shark.radius * 0.3 + undulate, 0, undulate * 0.5);
+  ctx.quadraticCurveTo(shark.radius * 0.4, shark.radius * 0.5 + undulate, shark.radius, undulate);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(20, 20, 20, 1)';
+  ctx.beginPath();
+  ctx.arc(shark.radius * 0.6, -3 + undulate * 0.7, 2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+```
+
+Match or exceed this quality level. Use multiple shapes, gradients, and animation."""
+
+
+@app.post("/api/generate-theme")
+async def generate_theme(body: GenerateThemeRequest):
+    """Generate a custom game theme using Claude."""
+    try:
+        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+        user_prompt = f"""Create a game theme with:
+- Avatar: {body.avatar_description}
+- Background: {body.background_description}
+- Obstacle: {body.obstacle_description}
+
+Return ONLY valid JSON (no markdown) with this exact structure:
+{{
+  "drawAvatar": "...function body...",
+  "drawObstacle": "...function body...",
+  "drawBackground": "...function body...",
+  "colors": {{
+    "bg": "#hexcolor",
+    "bgTop": "#hexcolor",
+    "line": "rgba(...)",
+    "lineGlow": "rgba(...)",
+    "safe": "rgba(...)",
+    "accent": "#hexcolor",
+    "particle": "rgba(...)",
+    "damageParticle": "rgba(...)"
+  }},
+  "labels": {{
+    "healthLabel": "WORD",
+    "onTargetText": "PHRASE",
+    "damageText": "PHRASE",
+    "countdownGo": "WORD!"
+  }}
+}}"""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=THEME_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+
+        raw_text = message.content[0].text.strip()
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[1]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[: raw_text.rfind("```")]
+            raw_text = raw_text.strip()
+
+        theme_data = json.loads(raw_text)
+        return theme_data
+
+    except json.JSONDecodeError as exc:
+        return {"error": f"Failed to parse Claude response as JSON: {exc}"}
+    except Exception as exc:
+        return {"error": str(exc)}

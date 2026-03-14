@@ -33,3 +33,4 @@ build/Release
 # Coverage
 coverage/
 .nyc_output/
+backend/__pycache__/

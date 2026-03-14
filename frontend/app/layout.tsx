@@ -1,18 +1,28 @@
-import './globals.css'
+import type { Metadata } from 'next';
+import { Press_Start_2P } from 'next/font/google';
+import './globals.css';
 
-export const metadata = {
+const pixelFont = Press_Start_2P({
+  weight: '400',
+  subsets: ['latin'],
+  variable: '--font-pixel',
+});
+
+export const metadata: Metadata = {
   title: 'MOONSHOT',
-  description: 'Every coin you collect is a real trade',
-}
+  description: 'A generative trading game',
+};
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <html lang="en">
-      <body className="bg-black text-white antialiased">{children}</body>
+      <body className={`${pixelFont.variable} font-[family-name:var(--font-pixel)]`}>
+        {children}
+      </body>
     </html>
-  )
+  );
 }

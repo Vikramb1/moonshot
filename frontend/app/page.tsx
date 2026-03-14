@@ -42,20 +42,22 @@ export default function LandingPage() {
             </div>
           </Link>
 
-          {/* ASTEROID DODGE — coming soon */}
-          <div className="pixel-panel p-5 flex flex-col gap-2 opacity-50 cursor-not-allowed">
-            <div className="flex items-center justify-between">
-              <span className="text-xs md:text-sm text-retro-gray uppercase">
-                Game Mode
+          {/* SURF SHARK — active game */}
+          <Link href="/surf/lobby" className="block">
+            <div className="pixel-panel p-5 flex flex-col gap-2 hover:border-ocean-teal transition-colors cursor-pointer">
+              <div className="flex items-center justify-between">
+                <span className="text-xs md:text-sm text-ocean-teal uppercase">
+                  Game Mode
+                </span>
+              </div>
+              <span className="text-sm md:text-base text-retro-white uppercase">
+                Surf Shark
               </span>
-              <span className="text-[8px] text-retro-yellow border border-retro-yellow px-2 py-0.5 uppercase">
-                Soon
+              <span className="text-[8px] md:text-[10px] text-retro-white/40 uppercase">
+                Ride the price wave, dodge sharks, earn profits
               </span>
             </div>
-            <span className="text-sm md:text-base text-retro-gray uppercase">
-              Asteroid Dodge
-            </span>
-          </div>
+          </Link>
 
           {/* DESCRIBE A GAME — coming soon */}
           <div className="pixel-panel p-5 flex flex-col gap-2 opacity-50 cursor-not-allowed">

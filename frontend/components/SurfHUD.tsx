@@ -1,0 +1,274 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+function lerpVal(a: number, b: number, t: number) { return a + (b - a) * t; }
+
+function healthColor(val: number): [number, number, number] {
+  if (val >= 60) {
+    const t = (val - 60) / 40;
+    return [
+      Math.round(lerpVal(255, 32, t)),
+      Math.round(lerpVal(160, 176, t)),
+      Math.round(lerpVal(0, 176, t)),
+    ];
+  } else {
+    const t = val / 60;
+    return [
+      255,
+      Math.round(lerpVal(50, 160, t)),
+      Math.round(lerpVal(50, 0, t)),
+    ];
+  }
+}
+
+interface SurfHUDProps {
+  currentPrice: number;
+  previousPrice: number;
+  priceDirection: 'up' | 'down' | 'neutral';
+  timeRemaining: number;
+  secondsOnTarget: number;
+  totalPlaced: number;
+  estimatedPnL: number;
+  health: number;
+  hitFlash: boolean;
+}
+
+export default function SurfHUD({
+  currentPrice,
+  previousPrice,
+  priceDirection,
+  timeRemaining,
+  secondsOnTarget,
+  totalPlaced,
+  estimatedPnL,
+  health,
+  hitFlash,
+}: SurfHUDProps) {
+  const [priceScale, setPriceScale] = useState(false);
+  const [wipeout, setWipeout] = useState(false);
+  const prevHealth = useRef(health);
+
+  const healthBarRef = useRef<HTMLDivElement>(null);
+  const healthPctRef = useRef<HTMLSpanElement>(null);
+  const healthDisplayedRef = useRef(100);
+  const healthTargetRef = useRef(100);
+  const frameCountRef = useRef(0);
+
+  healthTargetRef.current = health;
+
+  useEffect(() => {
+    let animId: number;
+    const animate = () => {
+      const hd = healthDisplayedRef.current;
+      const target = healthTargetRef.current;
+      healthDisplayedRef.current = hd + (target - hd) * 0.06;
+      frameCountRef.current++;
+
+      const val = healthDisplayedRef.current;
+      const [r, g, b] = healthColor(val);
+      const color = `rgb(${r},${g},${b})`;
+
+      let opacity = 1;
+      if (val < 30) {
+        opacity = 0.7 + 0.3 * Math.sin(frameCountRef.current * 0.15);
+      }
+
+      if (healthBarRef.current) {
+        healthBarRef.current.style.width = `${val}%`;
+        healthBarRef.current.style.background = color;
+        healthBarRef.current.style.opacity = String(opacity);
+      }
+      if (healthPctRef.current) {
+        healthPctRef.current.textContent = `${Math.round(val)}%`;
+        healthPctRef.current.style.color = color;
+      }
+
+      animId = requestAnimationFrame(animate);
+    };
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, []);
+
+  useEffect(() => {
+    setPriceScale(true);
+    const t = setTimeout(() => setPriceScale(false), 150);
+    return () => clearTimeout(t);
+  }, [currentPrice]);
+
+  useEffect(() => {
+    if (health < prevHealth.current - 5) {
+      setWipeout(true);
+      const t = setTimeout(() => setWipeout(false), 600);
+      prevHealth.current = health;
+      return () => clearTimeout(t);
+    }
+    prevHealth.current = health;
+  }, [health]);
+
+  const formatTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  };
+
+  const pctChange = previousPrice > 0
+    ? ((currentPrice - previousPrice) / previousPrice * 100).toFixed(2)
+    : '0.00';
+  const pctPositive = parseFloat(pctChange) >= 0;
+
+  const isLowTime = timeRemaining <= 10;
+  const isPnLPositive = estimatedPnL >= 0;
+
+  const panelStyle: React.CSSProperties = {
+    border: '4px solid #20b0b0',
+    background: 'rgba(10, 26, 46, 0.9)',
+    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+    borderRadius: 6,
+  };
+
+  return (
+    <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 10 }}>
+      {/* Top left — asset panel */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', top: 16, left: 16,
+        padding: '10px 14px',
+      }}>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(224,240,255,0.6)', textTransform: 'uppercase' }}>ETH / USD</div>
+        <div style={{
+          fontSize: 14, fontWeight: 'bold', color: '#e0f0ff',
+          transform: priceScale ? 'scale(1.04)' : 'scale(1)',
+          transition: 'transform 0.15s ease',
+          marginTop: 4,
+        }}>
+          ${currentPrice > 0 ? currentPrice.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--'}
+          <span style={{
+            color: priceDirection === 'up' ? '#20b0b0' : priceDirection === 'down' ? '#c03020' : 'rgba(224,240,255,0.4)',
+            marginLeft: 6, fontSize: 10,
+          }}>
+            {priceDirection === 'up' ? '▲' : priceDirection === 'down' ? '▼' : ''}
+          </span>
+        </div>
+        <div style={{ fontSize: 7, color: pctPositive ? '#20b0b0' : '#c03020', marginTop: 2 }}>
+          {pctPositive ? '+' : ''}{pctChange}%
+        </div>
+      </div>
+
+      {/* Top center — stamina bar */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '8px 14px',
+        borderColor: hitFlash ? 'rgba(255,50,50,0.8)' : '#20b0b0',
+        transition: 'border-color 0.1s ease',
+      }}>
+        <span style={{
+          fontSize: 9, letterSpacing: 3,
+          color: 'rgba(32, 176, 176, 0.8)',
+          fontFamily: "'Space Mono', monospace",
+        }}>STAMINA</span>
+        <div style={{
+          width: 200, height: 14,
+          background: 'rgba(255,255,255,0.06)',
+          border: '1px solid rgba(255,255,255,0.12)',
+          borderRadius: 99,
+          position: 'relative', overflow: 'hidden',
+        }}>
+          <div
+            ref={healthBarRef}
+            style={{
+              width: '100%', height: '100%',
+              borderRadius: 99,
+              background: 'rgb(32, 176, 176)',
+            }}
+          />
+        </div>
+        <span
+          ref={healthPctRef}
+          style={{
+            fontSize: 10,
+            fontFamily: "'Space Mono', monospace",
+            fontWeight: 'bold',
+            color: 'rgb(32, 176, 176)',
+            minWidth: 32,
+          }}
+        >100%</span>
+      </div>
+
+      {/* Top right — timer */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', top: 16, right: 88,
+        padding: '10px 14px', textAlign: 'right',
+      }}>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(224,240,255,0.6)', textTransform: 'uppercase' }}>TIME</div>
+        <div style={{
+          fontSize: 16, fontWeight: 'bold',
+          color: isLowTime ? '#c03020' : '#e0f0ff',
+          animation: isLowTime ? 'timerShake 0.1s infinite alternate' : undefined,
+          marginTop: 4,
+        }}>
+          {formatTime(timeRemaining)}
+        </div>
+      </div>
+
+      {/* Bottom left — trade stats */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', bottom: 20, left: 16,
+        padding: '8px 14px',
+      }}>
+        <div style={{ fontSize: 7, color: 'rgba(224,240,255,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+          <span style={{ color: '#20b0b0' }}>●</span>{' '}
+          {secondsOnTarget}s on wave
+        </div>
+        <div style={{ fontSize: 7, color: 'rgba(224,240,255,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>
+          <span style={{ color: '#20b0b0' }}>●</span>{' '}
+          ${totalPlaced.toFixed(2)} placed
+        </div>
+      </div>
+
+      {/* Bottom right — PnL */}
+      <div style={{
+        ...panelStyle,
+        position: 'absolute', bottom: 20, right: 88,
+        padding: '10px 14px', textAlign: 'right',
+      }}>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(224,240,255,0.6)', textTransform: 'uppercase' }}>EST. PNL</div>
+        <div style={{
+          fontSize: 14, fontWeight: 'bold',
+          color: isPnLPositive ? '#20b0b0' : '#c03020',
+          marginTop: 4,
+        }}>
+          {isPnLPositive ? '+' : ''}${estimatedPnL.toFixed(2)}
+        </div>
+      </div>
+
+      {/* Wipeout overlay */}
+      {wipeout && (
+        <div style={{
+          position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+          fontSize: 12, fontWeight: 'bold', color: '#2080a0',
+          animation: 'hullBreach 0.6s ease-out forwards',
+          pointerEvents: 'none',
+          textShadow: '0 0 10px rgba(32, 128, 160, 0.6)',
+          textTransform: 'uppercase',
+          letterSpacing: 2,
+        }}>
+          WIPEOUT
+        </div>
+      )}
+
+      <style>{`
+        @keyframes timerShake { from { transform: translateX(-2px); } to { transform: translateX(2px); } }
+        @keyframes hullBreach {
+          0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          50% { transform: translate(-50%, -50%) scale(1.08); }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+        }
+      `}</style>
+    </div>
+  );
+}

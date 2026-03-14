@@ -21,11 +21,15 @@ import type { Coin, GameEndReason, GameParams, GameResult, GameStatus, Order } f
 // Constants
 // ---------------------------------------------------------------------------
 
-/** BTC quantity placed for every coin collected. Adjust as desired. */
-const DEFAULT_ORDER_SIZE = 0.001;
+/**
+ * USD notional size placed for every coin collected.
+ * Liquid's API takes size as USD notional, not BTC quantity.
+ * $10 = minimum meaningful order on most Liquid markets.
+ */
+const DEFAULT_ORDER_SIZE_USD = 10;
 
-/** BTC/USD Liquid product ID. */
-const PRODUCT_ID = 1;
+/** Liquid market symbol for BTC perpetual. */
+const SYMBOL = 'BTC-PERP';
 
 /** Y-axis bounds for ship clamping (world units). */
 export const MIN_Y = -5;
@@ -190,9 +194,9 @@ export function useGameEngine(params: GameParams) {
     const side: 'buy' | 'sell' = coin.priceLevel >= currentPrice ? 'buy' : 'sell';
 
     const orderPayload = {
-      product_id: PRODUCT_ID,
+      symbol: SYMBOL,
       price: coin.priceLevel,
-      size: DEFAULT_ORDER_SIZE,
+      size: DEFAULT_ORDER_SIZE_USD,
       side,
     };
 
@@ -221,7 +225,7 @@ export function useGameEngine(params: GameParams) {
     const order: Order = {
       coinId: coin.id,
       priceLevel: coin.priceLevel,
-      size: DEFAULT_ORDER_SIZE,
+      size: DEFAULT_ORDER_SIZE_USD,
       side,
       timestamp: Date.now(),
       liquidOrderId,

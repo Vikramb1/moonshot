@@ -26,7 +26,7 @@ import type { GameParams } from '@/types';
 
 export default function LobbyPage() {
   const router = useRouter();
-  const { currentPrice, isConnected } = useLiquid(1);
+  const { currentPrice, isConnected } = useLiquid('BTC-PERP');
 
   // ---------------------------------------------------------------------------
   // Form state

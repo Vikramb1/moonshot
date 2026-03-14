@@ -50,9 +50,6 @@ const COIN_SPAWN_OFFSET = 20;
 /** Price range as a percentage of current price (±2%). */
 const PRICE_RANGE_PCT = 0.02;
 
-/** Default order size in BTC for each collected coin. */
-const DEFAULT_ORDER_SIZE = 0.001;
-
 // ---------------------------------------------------------------------------
 // Coin grid mapping helpers
 // ---------------------------------------------------------------------------
@@ -448,7 +445,7 @@ interface GameProps {
 }
 
 export default function Game({ params, onGameEnd }: GameProps) {
-  const { currentPrice, previousPrice, priceDirection, isConnected } = useLiquid(1);
+  const { currentPrice, previousPrice, priceDirection, isConnected } = useLiquid('BTC-PERP');
 
   // HUD state — passed down from engine via Scene (lifted here for overlay)
   // TODO: lift useGameEngine here so HUD can read from it directly

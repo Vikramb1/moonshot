@@ -9,34 +9,28 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLiquid } from '@/lib/useLiquid';
+import type { TradingSymbol } from '@/types';
 
 export default function LobbyPage() {
   const router = useRouter();
-  const { currentPrice, isConnected } = useLiquid('ETH-PERP');
+  const [symbol, setSymbol] = useState<TradingSymbol>('ETH-PERP');
+  const { currentPrice, isConnected } = useLiquid(symbol);
 
   const [duration, setDuration] = useState<30 | 60>(60);
-  const [profitInput, setProfitInput] = useState<string>('');
-  const [lossInput, setLossInput] = useState<string>('');
-  const [positionSize, setPositionSize] = useState<string>('0.5');
+  const [positionSize, setPositionSize] = useState<string>('100');
+  const [useLive, setUseLive] = useState(false);
 
   function buildSummary(): string {
-    const parts: string[] = [`${duration}s elapsed`];
-    if (profitInput && parseFloat(profitInput) > 0)
-      parts.push(`+$${parseFloat(profitInput).toFixed(2)} profit hit`);
-    if (lossInput && parseFloat(lossInput) > 0)
-      parts.push(`-$${parseFloat(lossInput).toFixed(2)} loss hit`);
-    return `Game ends when: ${parts.join(', or ')}`;
+    return `Game ends when: ${duration}s elapsed`;
   }
 
   function handleLaunch() {
     const params = new URLSearchParams();
     params.set('duration', String(duration));
-    if (profitInput && parseFloat(profitInput) > 0)
-      params.set('profitThreshold', profitInput);
-    if (lossInput && parseFloat(lossInput) > 0)
-      params.set('lossThreshold', lossInput);
+    params.set('symbol', symbol);
+    if (useLive) params.set('useLive', '1');
     const ps = parseFloat(positionSize);
-    if (ps >= 0.5) params.set('positionSize', String(ps));
+    if (ps >= 1) params.set('positionSize', String(ps));
     router.push(`/game?${params.toString()}`);
   }
 
@@ -61,6 +55,26 @@ export default function LobbyPage() {
             Mission Config
           </h2>
 
+          {/* Asset */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
+              Asset
+            </label>
+            <div className="flex gap-3">
+              {(['ETH-PERP', 'BTC-PERP', 'SOL-PERP'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSymbol(s)}
+                  className={`flex-1 pixel-btn text-xs py-2 ${
+                    symbol === s ? 'pixel-btn-green' : ''
+                  }`}
+                >
+                  {s.replace('-PERP', '')}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* Duration */}
           <div className="flex flex-col gap-2">
             <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
@@ -81,44 +95,6 @@ export default function LobbyPage() {
             </div>
           </div>
 
-          {/* Profit threshold */}
-          <div className="flex flex-col gap-2">
-            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
-              Take Profit At
-            </label>
-            <div className="flex items-center border-4 border-retro-border bg-space-deeper px-3 py-2">
-              <span className="text-retro-green text-xs mr-2">+$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="e.g. 10.00"
-                value={profitInput}
-                onChange={(e) => setProfitInput(e.target.value)}
-                className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
-              />
-            </div>
-          </div>
-
-          {/* Loss threshold */}
-          <div className="flex flex-col gap-2">
-            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
-              Stop Loss At
-            </label>
-            <div className="flex items-center border-4 border-retro-border bg-space-deeper px-3 py-2">
-              <span className="text-retro-red text-xs mr-2">-$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="e.g. 5.00"
-                value={lossInput}
-                onChange={(e) => setLossInput(e.target.value)}
-                className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
-              />
-            </div>
-          </div>
-
           {/* Position Size */}
           <div className="flex flex-col gap-2">
             <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
@@ -128,14 +104,41 @@ export default function LobbyPage() {
               <span className="text-retro-white/60 text-xs mr-2">$</span>
               <input
                 type="number"
-                min="0.5"
-                step="0.5"
+                min="1"
+                step="10"
                 value={positionSize}
                 onChange={(e) => setPositionSize(e.target.value)}
                 className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
               />
             </div>
-            <p className="text-[7px] text-retro-white/30">25x leverage · min $0.50</p>
+            <p className="text-[7px] text-retro-white/30">25x leverage · min $1</p>
+          </div>
+
+          {/* Trading Mode */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
+              Trading Mode
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setUseLive(false)}
+                className={`flex-1 pixel-btn text-xs py-2 ${!useLive ? 'pixel-btn-green' : ''}`}
+              >
+                PAPER
+              </button>
+              <button
+                onClick={() => setUseLive(true)}
+                className={`flex-1 pixel-btn text-xs py-2 ${useLive ? 'pixel-btn-green' : ''}`}
+                style={useLive ? { borderColor: '#c03020', background: 'rgba(192, 48, 32, 0.2)' } : {}}
+              >
+                LIVE
+              </button>
+            </div>
+            {useLive && (
+              <p className="text-[7px] text-retro-red">
+                REAL MONEY — orders placed on Liquid exchange
+              </p>
+            )}
           </div>
 
           {/* Summary */}
@@ -148,7 +151,7 @@ export default function LobbyPage() {
           {/* Price + balance */}
           <div className="flex justify-between text-[8px] text-retro-white/40">
             <span>
-              ETH/USD{' '}
+              {symbol.replace('-PERP', '')}/USD{' '}
               <span className={`font-bold ${isConnected ? 'text-retro-green' : 'text-retro-gray'}`}>
                 {currentPrice > 0 ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '--'}
               </span>

@@ -33,6 +33,7 @@ interface HUDProps {
   estimatedPnL: number;
   health: number;
   hitFlash: boolean;
+  symbol?: string;
 }
 
 export default function HUD({
@@ -45,6 +46,7 @@ export default function HUD({
   estimatedPnL,
   health,
   hitFlash,
+  symbol = 'ETH-PERP',
 }: HUDProps) {
   const [priceScale, setPriceScale] = useState(false);
   const [hullBreach, setHullBreach] = useState(false);
@@ -131,29 +133,41 @@ export default function HUD({
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none" style={{ zIndex: 10 }}>
-      {/* Top left — asset panel */}
+      {/* Top left — PnL (large) + asset price */}
       <div style={{
         ...panelStyle,
         position: 'absolute', top: 16, left: 16,
-        padding: '10px 14px',
+        padding: '12px 18px',
       }}>
-        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>ETH / USD</div>
+        <div style={{ fontSize: 8, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>EST. PNL</div>
         <div style={{
-          fontSize: 14, fontWeight: 'bold', color: '#f0f0e0',
-          transform: priceScale ? 'scale(1.04)' : 'scale(1)',
-          transition: 'transform 0.15s ease',
-          marginTop: 4,
+          fontSize: 32, fontWeight: 'bold',
+          color: isPnLPositive ? '#40a030' : '#c03020',
+          marginTop: 2, lineHeight: 1.1,
         }}>
-          ${currentPrice > 0 ? currentPrice.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '--'}
-          <span style={{
-            color: priceDirection === 'up' ? '#40a030' : priceDirection === 'down' ? '#c03020' : 'rgba(240,240,224,0.4)',
-            marginLeft: 6, fontSize: 10,
-          }}>
-            {priceDirection === 'up' ? '▲' : priceDirection === 'down' ? '▼' : ''}
-          </span>
+          {isPnLPositive ? '+' : ''}${estimatedPnL.toFixed(2)}
         </div>
-        <div style={{ fontSize: 7, color: pctPositive ? '#40a030' : '#c03020', marginTop: 2 }}>
-          {pctPositive ? '+' : ''}{pctChange}%
+        <div style={{ marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
+          <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>
+            {symbol.replace('-PERP', '')} / USD
+          </div>
+          <div style={{
+            fontSize: 14, fontWeight: 'bold', color: '#f0f0e0',
+            transform: priceScale ? 'scale(1.04)' : 'scale(1)',
+            transition: 'transform 0.15s ease',
+            marginTop: 2,
+          }}>
+            ${currentPrice > 0 ? currentPrice.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : '--'}
+            <span style={{
+              color: priceDirection === 'up' ? '#40a030' : priceDirection === 'down' ? '#c03020' : 'rgba(240,240,224,0.4)',
+              marginLeft: 6, fontSize: 10,
+            }}>
+              {priceDirection === 'up' ? '▲' : priceDirection === 'down' ? '▼' : ''}
+            </span>
+          </div>
+          <div style={{ fontSize: 7, color: pctPositive ? '#40a030' : '#c03020', marginTop: 2 }}>
+            {pctPositive ? '+' : ''}{pctChange}%
+          </div>
         </div>
       </div>
 
@@ -232,21 +246,6 @@ export default function HUD({
         </div>
       </div>
 
-      {/* Bottom right — PnL */}
-      <div style={{
-        ...panelStyle,
-        position: 'absolute', bottom: 20, right: 88,
-        padding: '10px 14px', textAlign: 'right',
-      }}>
-        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>EST. PNL</div>
-        <div style={{
-          fontSize: 14, fontWeight: 'bold',
-          color: isPnLPositive ? '#40a030' : '#c03020',
-          marginTop: 4,
-        }}>
-          {isPnLPositive ? '+' : ''}${estimatedPnL.toFixed(2)}
-        </div>
-      </div>
 
 
       {/* Hull breach overlay */}

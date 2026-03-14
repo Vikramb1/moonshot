@@ -24,13 +24,9 @@ const SAFE_ZONE_HALF = 32;
 const ASTEROID_BASE_INTERVAL = 28;
 const GAME_AREA_PCT = 0.75;
 const PRICE_AXIS_W = 68;
-// Chart range — tuned for ETH volatility ±0.2%
-const VISIBLE_RANGE_PCT = 0.002;
+// Chart range — tight enough to see tick-level moves, auto-rescales on breakout
+const VISIBLE_RANGE_PCT = 0.0005;
 const CHART_HEIGHT_FRACTION = 0.6;
-
-// Simulated price constants
-const SEED_PRICE = 2500;
-const NOISE_FREQUENCY = 0.06;
 
 // Colors
 const COL_BG = '#0d0816';
@@ -152,9 +148,10 @@ interface GameProps {
 }
 
 export default function Game({ params, onGameEnd }: GameProps) {
-  const { currentPrice, previousPrice, priceDirection, isConnected } = useLiquid('ETH-PERP');
+  const { currentPrice, previousPrice, priceDirection, isConnected } = useLiquid(params.symbol);
   const engine = useGameEngine(params);
   const [tradeLog, setTradeLog] = useState<TradeLogEntry[]>([]);
+  const [livePrice, setLivePrice] = useState(0);
 
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const gameCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -183,7 +180,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
     interpTarget: 0,
     interpPrev: 0,
     interpFrame: 0,
-    displayPrice: SEED_PRICE,
+    displayPrice: 0,
     // Dynamic price range
     animMin: 0,
     animMax: 0,
@@ -192,13 +189,6 @@ export default function Game({ params, onGameEnd }: GameProps) {
     rescaleStartMin: 0,
     rescaleStartMax: 0,
     rescaleFrame: 20,
-    // Simulated price state
-    simPrice: SEED_PRICE,
-    simNoiseAmp: SEED_PRICE * 0.0001,
-    simSpikeValue: 0,
-    simSpikeFrames: 0,
-    simDeltaHistory: [] as number[],
-    simLastPrice: SEED_PRICE,
     // Game objects
     asteroids: [] as Asteroid[],
     asteroidTimer: 0,
@@ -235,7 +225,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
   useEffect(() => {
     const s = stateRef.current;
-    if (currentPrice === s.lastWsPrice) return;
+    if (currentPrice === 0 || currentPrice === s.lastWsPrice) return;
     s.interpPrev = s.lastWsPrice || currentPrice;
     s.interpTarget = currentPrice;
     s.interpFrame = 0;
@@ -251,24 +241,40 @@ export default function Game({ params, onGameEnd }: GameProps) {
       const side: 'long' | 'short' = tilt < 0 ? 'long' : 'short';
       const price = stateRef.current.interpPrice;
       const size = params.positionSize;
-      // Dummy trade — no real API call
-      const data = { success: true, order_id: 'dummy-' + Date.now() };
-      const order: Order = {
-        coinId: `tilt-${Date.now()}`,
-        priceLevel: price,
-        size,
-        side: side === 'long' ? 'buy' : 'sell',
-        timestamp: Date.now(),
-        liquidOrderId: data.order_id,
+
+      const recordTrade = (orderId: string) => {
+        const order: Order = {
+          coinId: `tilt-${Date.now()}`,
+          priceLevel: price,
+          size,
+          side: side === 'long' ? 'buy' : 'sell',
+          timestamp: Date.now(),
+          liquidOrderId: orderId,
+        };
+        engine.addOrder(order);
+        setTradeLog((prev) => {
+          const next = [...prev, { side, price, size, timestamp: Date.now() }];
+          return next.length > 50 ? next.slice(-50) : next;
+        });
       };
-      engine.addOrder(order);
-      setTradeLog((prev) => {
-        const next = [...prev, { side, price, size, timestamp: Date.now() }];
-        return next.length > 50 ? next.slice(-50) : next;
-      });
+
+      if (params.useLive) {
+        // Real API call to Liquid
+        fetch('http://localhost:8000/api/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbol: params.symbol, size, side, leverage: 25 }),
+        })
+          .then((r) => r.json())
+          .then((data) => { if (data.success) recordTrade(data.order_id); })
+          .catch(() => {});
+      } else {
+        // Paper trade — no network call
+        recordTrade('paper-' + Date.now());
+      }
     }, 1000);
     return () => clearInterval(interval);
-  }, [engine.gameStatus, params.positionSize]);
+  }, [engine.gameStatus, params.positionSize, params.symbol, params.useLive]);
 
   useEffect(() => {
     const resize = () => {
@@ -282,10 +288,10 @@ export default function Game({ params, onGameEnd }: GameProps) {
   }, []);
 
   // =========================================================================
-  // MAIN GAME LOOP
+  // MAIN GAME LOOP — waits for real WS price before starting
   // =========================================================================
   useEffect(() => {
-    if (engine.gameStatus !== 'playing') return;
+    if (engine.gameStatus !== 'playing' || !isConnected || currentPrice === 0) return;
 
     const s = stateRef.current;
     const bgC = bgCanvasRef.current;
@@ -297,12 +303,10 @@ export default function Game({ params, onGameEnd }: GameProps) {
     if (!s.mounted) {
       s.mounted = true;
       s.shipY = gC.height / 2;
-      const initPrice = currentPrice || SEED_PRICE;
+      const initPrice = currentPrice;
       s.interpPrice = initPrice;
       s.interpPrev = initPrice;
       s.interpTarget = initPrice;
-      s.simPrice = initPrice;
-      s.simLastPrice = initPrice;
       s.displayPrice = initPrice;
       const halfRange = initPrice * VISIBLE_RANGE_PCT;
       s.animMin = initPrice - halfRange;
@@ -336,43 +340,10 @@ export default function Game({ params, onGameEnd }: GameProps) {
       const interpT = Math.min(s.interpFrame / 30, 1);
       s.interpPrice = lerp(s.interpPrev, s.interpTarget, interpT);
 
-      // --- Simulated price (when disconnected) ---
-      if (!isConnected) {
-        const baseAmp = s.simNoiseAmp;
-        const noiseOffset =
-          Math.sin(frame * NOISE_FREQUENCY) * baseAmp
-          + Math.sin(frame * NOISE_FREQUENCY * 2.3) * baseAmp * 0.4
-          + Math.sin(frame * NOISE_FREQUENCY * 0.7) * baseAmp * 0.6;
-
-        const trendOffset = Math.sin(frame * 0.004) * SEED_PRICE * 0.00008;
-
-        // Spike injection every 180 frames
-        if (frame > 0 && frame % 180 === 0) {
-          s.simSpikeValue = (Math.random() - 0.5) * SEED_PRICE * 0.0002;
-          s.simSpikeFrames = 10;
-        }
-        const spike = s.simSpikeFrames > 0 ? s.simSpikeValue : 0;
-        if (s.simSpikeFrames > 0) s.simSpikeFrames--;
-
-        s.simPrice = SEED_PRICE + noiseOffset + trendOffset + spike;
-
-        // Auto-scale noise
-        const delta = Math.abs(s.simPrice - s.simLastPrice) / s.simPrice;
-        s.simDeltaHistory.push(delta);
-        if (s.simDeltaHistory.length > 10) s.simDeltaHistory.shift();
-        if (s.simDeltaHistory.length >= 3) {
-          const avgDelta = s.simDeltaHistory.reduce((a, b) => a + b, 0) / s.simDeltaHistory.length;
-          const baseLine = SEED_PRICE * 0.0001;
-          if (avgDelta < 0.00003) s.simNoiseAmp = baseLine * 2.5;
-          else if (avgDelta > 0.00015) s.simNoiseAmp = baseLine * 0.6;
-          else s.simNoiseAmp = baseLine;
-        }
-        s.simLastPrice = s.simPrice;
-      }
-
-      // Display price: real when connected, simulated when not
-      const displayPrice = isConnected ? s.interpPrice : s.simPrice;
+      // Display price — always real WS data (game won't start without connection)
+      const displayPrice = s.interpPrice;
       s.displayPrice = displayPrice;
+      if (frame % 6 === 0) setLivePrice(displayPrice);
 
       // --- Dynamic rescaling (±0.01% range, 10% edge trigger, 45-frame anim) ---
       const visRange = s.animMax - s.animMin;
@@ -555,10 +526,12 @@ export default function Game({ params, onGameEnd }: GameProps) {
       if (s.flashRed > 0) s.flashRed--;
       if (s.flashWhite.life > 0) s.flashWhite.life--;
 
-      // --- PnL (always uses real/mock price, never simulated) ---
+      // --- PnL with 25x leverage ---
+      // PnL per order = (priceDelta / entryPrice) * positionSize * leverage * direction
       const pnl = engine.ordersRef.current.reduce((sum: number, order: Order) => {
-        const diff = s.interpPrice - order.priceLevel;
-        return sum + diff * order.size * (order.side === 'buy' ? 1 : -1) * 0.001;
+        const pctMove = (displayPrice - order.priceLevel) / order.priceLevel;
+        const direction = order.side === 'buy' ? 1 : -1;
+        return sum + pctMove * order.size * 25 * direction;
       }, 0);
       engine.checkGameEndConditions(pnl);
       if (engine.endedRef.current) return;
@@ -632,15 +605,15 @@ export default function Game({ params, onGameEnd }: GameProps) {
         ctx.save();
         ctx.lineJoin = 'round'; ctx.lineCap = 'round';
 
-        ctx.lineWidth = 10; ctx.strokeStyle = 'rgba(160, 120, 200, 0.1)';
+        ctx.lineWidth = 14; ctx.strokeStyle = 'rgba(160, 120, 200, 0.1)';
         buildPath(); ctx.stroke();
 
-        ctx.lineWidth = 5; ctx.strokeStyle = COL_LINE_GLOW;
+        ctx.lineWidth = 7; ctx.strokeStyle = COL_LINE_GLOW;
         ctx.globalAlpha = 0.35;
         buildPath(); ctx.stroke();
         ctx.globalAlpha = 1;
 
-        ctx.lineWidth = 2; ctx.strokeStyle = COL_LINE;
+        ctx.lineWidth = 3; ctx.strokeStyle = COL_LINE;
         ctx.shadowBlur = 12; ctx.shadowColor = 'rgba(200, 180, 255, 0.7)';
         buildPath(); ctx.stroke();
         ctx.shadowBlur = 0;
@@ -805,13 +778,13 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
     animFrameRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(animFrameRef.current);
-  }, [engine.gameStatus]);
+  }, [engine.gameStatus, isConnected, currentPrice]);
 
   // =========================================================================
   // Price axis data — labels at VISIBLE_RANGE_PCT * 0.25 increments
   // =========================================================================
   const s = stateRef.current;
-  const dp = s.displayPrice || currentPrice || SEED_PRICE;
+  const dp = s.displayPrice || currentPrice;
   const aMin = s.animMin || dp - dp * VISIBLE_RANGE_PCT;
   const aMax = s.animMax || dp + dp * VISIBLE_RANGE_PCT;
   const axisH = typeof window !== 'undefined' ? window.innerHeight : 800;
@@ -838,7 +811,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
       <canvas ref={gameCanvasRef} style={{ position: 'absolute', inset: 0, zIndex: 1 }} />
 
       <HUD
-        currentPrice={currentPrice}
+        currentPrice={livePrice || currentPrice}
         previousPrice={previousPrice}
         priceDirection={priceDirection}
         timeRemaining={engine.timeRemaining}
@@ -847,6 +820,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
         estimatedPnL={engine.totalPnL}
         health={engine.health}
         hitFlash={hitFlash}
+        symbol={params.symbol}
       />
 
       {/* Price axis */}
@@ -907,7 +881,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
         }} ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}>
           {tradeLog.map((t, i) => (
             <div key={i} style={{ color: t.side === 'long' ? '#40a030' : '#c03020', lineHeight: '18px' }}>
-              {t.side === 'long' ? 'BOUGHT' : 'SOLD'} ETH @ ${t.price.toFixed(2)} · ${t.size.toFixed(2)}
+              [{new Date(t.timestamp).toLocaleTimeString()}] {t.side === 'long' ? 'BOUGHT' : 'SOLD'} {params.symbol.replace('-PERP', '')} @ ${t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} · ${t.size.toFixed(2)}
             </div>
           ))}
         </div>

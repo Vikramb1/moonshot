@@ -9,11 +9,15 @@
  *  profitThreshold — auto-end game when totalPnL reaches this value (null = disabled)
  *  lossThreshold   — auto-end game when totalPnL drops to -this value (null = disabled)
  */
+export type TradingSymbol = 'ETH-PERP' | 'BTC-PERP' | 'SOL-PERP';
+
 export interface GameParams {
   duration: 30 | 60;
   profitThreshold: number | null;
   lossThreshold: number | null;
   positionSize: number;
+  symbol: TradingSymbol;
+  useLive: boolean;
 }
 
 /**

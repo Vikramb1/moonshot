@@ -119,3 +119,94 @@ body {
   0% { opacity: 0.4; }
   100% { opacity: 1; }
 }
+
+/* ------------------------------------------------------------------ */
+/* Ocean theme (Surf Shark)                                            */
+/* ------------------------------------------------------------------ */
+
+.ocean-bg {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, #1a3a5c 0%, #0a1a2e 100%);
+  overflow: hidden;
+}
+
+.ocean-bg::before,
+.ocean-bg::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 60px;
+  opacity: 0.15;
+  pointer-events: none;
+}
+
+.ocean-bg::before {
+  bottom: 30%;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 8px,
+    rgba(32, 176, 176, 0.3) 8px,
+    rgba(32, 176, 176, 0.3) 10px
+  );
+  animation: waveShift 6s ease-in-out infinite alternate;
+}
+
+.ocean-bg::after {
+  bottom: 20%;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 12px,
+    rgba(32, 128, 160, 0.25) 12px,
+    rgba(32, 128, 160, 0.25) 14px
+  );
+  animation: waveShift 8s ease-in-out infinite alternate-reverse;
+}
+
+@keyframes waveShift {
+  0% { transform: translateX(-20px); }
+  100% { transform: translateX(20px); }
+}
+
+.wave-panel {
+  border: 4px solid #20b0b0;
+  background: rgba(10, 26, 46, 0.9);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+}
+
+.wave-btn {
+  @apply px-6 py-3 font-bold uppercase tracking-wider text-sm;
+  border: 4px solid #20b0b0;
+  background: #2080a0;
+  color: #e0f0ff;
+  box-shadow: 0 4px 0 #186080, 0 6px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.1s, box-shadow 0.1s;
+  border-radius: 4px;
+}
+
+.wave-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 #186080, 0 7px 10px rgba(0, 0, 0, 0.3);
+}
+
+.wave-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 #186080, 0 3px 4px rgba(0, 0, 0, 0.3);
+}
+
+.wave-btn-green {
+  background: #20b0b0;
+  box-shadow: 0 4px 0 #188080, 0 6px 8px rgba(0, 0, 0, 0.3);
+}
+
+.wave-btn-green:hover {
+  box-shadow: 0 5px 0 #188080, 0 7px 10px rgba(0, 0, 0, 0.3);
+}
+
+.wave-btn-green:active {
+  box-shadow: 0 2px 0 #188080, 0 3px 4px rgba(0, 0, 0, 0.3);
+}

@@ -18,6 +18,7 @@ import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from liquidtrading import LiquidClient
 from pydantic import BaseModel
 
 load_dotenv()
@@ -26,6 +27,12 @@ LIQUID_API_KEY = os.getenv("LIQUID_API_KEY", "")
 LIQUID_API_SECRET = os.getenv("LIQUID_API_SECRET", "")
 LIQUID_REST_BASE = "https://api.liquid.com"
 LIQUID_WS_URL = "wss://tap.liquid.com/app/LiquidTapClient"
+
+# Liquid SDK client (new API)
+liquid = LiquidClient(
+    api_key=LIQUID_API_KEY,
+    api_secret=LIQUID_API_SECRET,
+)
 
 app = FastAPI(title="MOONSHOT Backend")
 
@@ -181,6 +188,130 @@ async def place_order(body: PlaceOrderRequest):
     return {
         "liquidOrderId": str(data.get("id", "")),
         "status": data.get("status", "unknown"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Liquid SDK — live price stream + 1-second trade
+# ---------------------------------------------------------------------------
+
+@app.websocket("/ws/price-stream/{symbol}")
+async def price_stream(ws: WebSocket, symbol: str = "ETH-PERP"):
+    """
+    Stream live prices for an asset via the Liquid SDK.
+
+    On initial connection, sends the last 30 seconds of 1-second candle data
+    as backfill, then polls the ticker every ~100ms for real-time updates.
+
+    Each message sent to the frontend:
+        { price: float, timestamp: int }
+    """
+    await ws.accept()
+
+    try:
+        # Backfill: fetch last 30 seconds of 1s candle data (use 1m candles, last 1)
+        # Since the smallest candle interval is 1m, we use the ticker polling approach
+        # for sub-minute granularity. Fetch the most recent 1m candle and current ticker
+        # to approximate the last 30 seconds.
+        now_ms = int(time.time() * 1000)
+        thirty_sec_ago = now_ms - 30_000
+
+        # Get 1m candles for recent history (last few minutes to ensure coverage)
+        candles = liquid.get_candles(symbol, interval="1m", limit=2)
+        for candle in candles:
+            candle_ts = int(candle.timestamp * 1000) if candle.timestamp < 1e12 else int(candle.timestamp)
+            # Send OHLC points as individual price points within the last 30s window
+            if candle_ts >= thirty_sec_ago:
+                for price_val in [candle.open, candle.high, candle.low, candle.close]:
+                    await ws.send_json({"price": price_val, "timestamp": candle_ts})
+
+        # Also send current ticker as the most recent backfill point
+        ticker = liquid.get_ticker(symbol)
+        await ws.send_json({
+            "price": ticker.mark_price,
+            "timestamp": now_ms,
+        })
+
+        # Live polling loop (~100ms interval)
+        last_price = ticker.mark_price
+        while True:
+            await asyncio.sleep(0.1)
+            try:
+                ticker = liquid.get_ticker(symbol)
+                current_price = ticker.mark_price
+                if current_price != last_price:
+                    await ws.send_json({
+                        "price": current_price,
+                        "timestamp": int(time.time() * 1000),
+                    })
+                    last_price = current_price
+            except Exception:
+                # Tolerate transient SDK errors; keep streaming
+                continue
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        print(f"[ws/price-stream] error: {exc}")
+    finally:
+        try:
+            await ws.close()
+        except Exception:
+            pass
+
+
+class TradeRequest(BaseModel):
+    """Body for POST /api/trade"""
+    symbol: str = "ETH-PERP"
+    size: float = 0.5  # margin in USD (with 25x leverage → $12.50 notional)
+    side: str  # 'long' | 'short'
+    leverage: int = 25
+
+
+@app.post("/api/trade")
+async def trade(body: TradeRequest):
+    """
+    Place a market trade and automatically close it after exactly 1 second.
+
+    - 'long' opens a buy, then closes after 1s.
+    - 'short' opens a sell, then closes after 1s.
+
+    Size is the margin amount in USD. With the default 25x leverage,
+    size=0.5 puts up ~$0.49 margin for a ~$12.50 notional position
+    (the minimum allowed by Hyperliquid is $10 notional).
+
+    Returns the opening order, then schedules the close in the background.
+    """
+    order_side = "buy" if body.side == "long" else "sell"
+
+    try:
+        order = liquid.place_order(
+            symbol=body.symbol,
+            side=order_side,
+            type="market",
+            size=body.size,
+            leverage=body.leverage,
+        )
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+    # Schedule the close after exactly 1 second in the background
+    async def close_after_delay():
+        await asyncio.sleep(1.0)
+        try:
+            liquid.close_position(body.symbol)
+        except Exception as exc:
+            print(f"[trade] failed to close {body.symbol}: {exc}")
+
+    asyncio.create_task(close_after_delay())
+
+    return {
+        "success": True,
+        "order_id": order.order_id,
+        "side": body.side,
+        "size": body.size,
+        "symbol": body.symbol,
+        "closes_in_ms": 1000,
     }
 
 

@@ -9,7 +9,11 @@ dependencies = [
   "python-dotenv",
   "httpx",
   "pyjwt",
+  "liquidtrading-python",
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
 
 [build-system]
 requires = ["hatchling"]

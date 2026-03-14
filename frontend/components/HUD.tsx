@@ -1,21 +1,7 @@
 'use client';
 
 /**
- * HUD — Heads-Up Display overlay
- *
- * Rendered as an absolute-positioned div over the Three.js canvas.
- * Displays live game telemetry so the player can track state at a glance.
- * Pure presentational component — receives all data via props, no internal state.
- *
- * Layout:
- *   top-left     — BTC/USD live price (updates each useLiquid tick)
- *   top-right    — countdown timer (red when under 10 seconds)
- *   bottom-left  — coins collected · orders placed
- *   bottom-right — estimated PnL (green if positive, red if negative)
- *   conditional  — progress bars for profit and/or loss thresholds
- *
- * TODO: animate price change flashes (brief highlight on each tick)
- * TODO: add subtle slide-in animation when HUD first mounts
+ * HUD — retro pixel-art heads-up display overlay
  */
 
 import type { GameParams } from '@/types';
@@ -37,18 +23,12 @@ export default function HUD({
   estimatedPnL,
   params,
 }: HUDProps) {
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  /** Format seconds as MM:SS for the countdown display. */
   function formatTime(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}:${String(s).padStart(2, '0')}`;
   }
 
-  /** Format a USD dollar amount with sign and 2 decimal places. */
   function formatPnL(pnl: number): string {
     const sign = pnl >= 0 ? '+' : '';
     return `${sign}$${pnl.toFixed(2)}`;
@@ -57,112 +37,87 @@ export default function HUD({
   const isLowTime = timeRemaining <= 10;
   const isPnLPositive = estimatedPnL > 0;
 
-  // ---------------------------------------------------------------------------
-  // Progress bar helpers
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Profit progress bar
-   * Fills from 0% → 100% as estimatedPnL approaches profitThreshold.
-   * Only rendered if params.profitThreshold is non-null.
-   *
-   * TODO: add a pulsing glow when near the threshold (>80% fill)
-   */
   const profitProgress =
     params.profitThreshold !== null && params.profitThreshold > 0
       ? Math.min(100, (Math.max(0, estimatedPnL) / params.profitThreshold) * 100)
       : null;
 
-  /**
-   * Loss progress bar
-   * Fills from 0% → 100% as estimatedPnL falls toward -lossThreshold.
-   * Only rendered if params.lossThreshold is non-null.
-   *
-   * TODO: add a pulsing red glow when near the threshold (>80% fill)
-   */
   const lossProgress =
     params.lossThreshold !== null && params.lossThreshold > 0
       ? Math.min(100, (Math.max(0, -estimatedPnL) / params.lossThreshold) * 100)
       : null;
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  // Render blocky progress bar segments
+  function PixelBar({ progress, color }: { progress: number; color: string }) {
+    const segments = 10;
+    const filled = Math.round((progress / 100) * segments);
+    return (
+      <div className="flex gap-0.5">
+        {Array.from({ length: segments }, (_, i) => (
+          <div
+            key={i}
+            className={`w-3 h-2 border border-retro-white/20 ${
+              i < filled ? color : 'bg-space-dark/50'
+            }`}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-10">
-      {/* ------------------------------------------------------------------ */}
-      {/* Top-left: live BTC price                                           */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="absolute top-4 left-4 text-sm font-mono text-slate-300">
-        <span className="text-slate-500 mr-1">BTC/USD</span>
-        <span className="text-cyan-400 font-bold text-base">
-          {currentPrice > 0 ? `$${currentPrice.toLocaleString()}` : '—'}
+      {/* Top-left: BTC price */}
+      <div className="absolute top-3 left-3 text-[8px]">
+        <span className="text-retro-white/40 mr-1">BTC/USD</span>
+        <span className="text-retro-green text-[10px]">
+          {currentPrice > 0 ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '--'}
         </span>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Top-right: countdown timer                                         */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Top-right: timer */}
       <div
-        className={`absolute top-4 right-4 text-2xl font-mono font-bold tabular-nums transition-colors ${
-          isLowTime ? 'text-red-400' : 'text-white'
+        className={`absolute top-3 right-3 text-lg tabular-nums transition-colors ${
+          isLowTime ? 'text-retro-red' : 'text-retro-white'
         }`}
-        style={isLowTime ? { textShadow: '0 0 10px rgba(255,80,80,0.8)' } : undefined}
+        style={isLowTime ? { textShadow: '0 0 10px rgba(192, 48, 32, 0.8)' } : undefined}
       >
         {formatTime(timeRemaining)}
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Bottom-left: coins + orders                                        */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="absolute bottom-6 left-4 text-xs font-mono text-slate-400">
-        <span>{coinsCollected} coins collected</span>
-        <span className="mx-2 text-slate-600">·</span>
-        <span>{ordersPlaced} orders placed</span>
+      {/* Bottom-left: coins + orders */}
+      <div className="absolute bottom-4 left-3 text-[8px] text-retro-white/50">
+        <span>{coinsCollected} coins</span>
+        <span className="mx-1 text-retro-white/20">|</span>
+        <span>{ordersPlaced} orders</span>
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Bottom-right: estimated PnL                                        */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Bottom-right: PnL */}
       <div
-        className={`absolute bottom-6 right-4 text-lg font-mono font-bold tabular-nums ${
-          isPnLPositive ? 'text-green-400' : estimatedPnL < 0 ? 'text-red-400' : 'text-slate-400'
+        className={`absolute bottom-4 right-3 text-sm tabular-nums ${
+          isPnLPositive ? 'text-retro-green' : estimatedPnL < 0 ? 'text-retro-red' : 'text-retro-white/50'
         }`}
       >
         {formatPnL(estimatedPnL)}
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Progress bars (only if thresholds are configured)                  */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Progress bars */}
       {(profitProgress !== null || lossProgress !== null) && (
-        <div className="absolute bottom-14 left-4 right-4 flex flex-col gap-2">
+        <div className="absolute bottom-12 left-3 right-3 flex flex-col gap-2">
           {profitProgress !== null && (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 w-16 shrink-0">Profit</span>
-              <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-green-400 rounded-full transition-all duration-500"
-                  style={{ width: `${profitProgress}%` }}
-                />
-              </div>
-              <span className="text-xs text-slate-500 w-16 text-right shrink-0">
+              <span className="text-[7px] text-retro-white/40 w-10 shrink-0 uppercase">Profit</span>
+              <PixelBar progress={profitProgress} color="bg-retro-green" />
+              <span className="text-[7px] text-retro-white/40 w-12 text-right shrink-0">
                 ${params.profitThreshold?.toFixed(2)}
               </span>
             </div>
           )}
-
           {lossProgress !== null && (
             <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500 w-16 shrink-0">Loss</span>
-              <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-red-400 rounded-full transition-all duration-500"
-                  style={{ width: `${lossProgress}%` }}
-                />
-              </div>
-              <span className="text-xs text-slate-500 w-16 text-right shrink-0">
+              <span className="text-[7px] text-retro-white/40 w-10 shrink-0 uppercase">Loss</span>
+              <PixelBar progress={lossProgress} color="bg-retro-red" />
+              <span className="text-[7px] text-retro-white/40 w-12 text-right shrink-0">
                 ${params.lossThreshold?.toFixed(2)}
               </span>
             </div>

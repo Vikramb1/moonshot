@@ -2,66 +2,22 @@
 
 /**
  * Lobby page — /lobby
- *
- * Lets the player configure game parameters before launching.
- * Shows a live summary sentence that updates as inputs change.
- * Displays current BTC price (live via WebSocket) and account balance.
- *
- * On LAUNCH, encodes chosen params into URL search params and
- * navigates to /game so the game page can parse them without shared state.
- *
- * Parameters:
- *   duration         — 30s or 60s toggle (default 60)
- *   profitThreshold  — optional: stop at +$X profit (empty = no limit)
- *   lossThreshold    — optional: stop at -$X loss (empty = no limit)
- *
- * TODO: add form validation (prevent negative thresholds, etc.)
- * TODO: fetch account balance via GET /api/account and display it
+ * Configure game parameters before launching.
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useLiquid } from '@/lib/useLiquid';
-import type { GameParams } from '@/types';
+import Link from 'next/link';
+import { useMockPrice } from '@/lib/useMockPrice';
 
 export default function LobbyPage() {
   const router = useRouter();
-  const { currentPrice, isConnected } = useLiquid(1);
+  const { currentPrice, isConnected } = useMockPrice();
 
-  // ---------------------------------------------------------------------------
-  // Form state
-  // ---------------------------------------------------------------------------
   const [duration, setDuration] = useState<30 | 60>(60);
   const [profitInput, setProfitInput] = useState<string>('');
   const [lossInput, setLossInput] = useState<string>('');
 
-  // ---------------------------------------------------------------------------
-  // Account balance (placeholder until GET /api/account is integrated)
-  // ---------------------------------------------------------------------------
-  const [accountBalance, setAccountBalance] = useState<string>('—');
-
-  useEffect(() => {
-    /**
-     * Fetch account balances from the backend.
-     * TODO: map to BTC / USD balances and display them formatted in the UI.
-     */
-    async function fetchBalance() {
-      try {
-        const res = await fetch('http://localhost:8000/api/account');
-        if (!res.ok) return;
-        const data = (await res.json()) as Array<{ currency: string; balance: string }>;
-        const usd = data.find((a) => a.currency === 'USD');
-        if (usd) setAccountBalance(`$${parseFloat(usd.balance).toFixed(2)}`);
-      } catch {
-        // Backend not yet running; silently swallow
-      }
-    }
-    void fetchBalance();
-  }, []);
-
-  // ---------------------------------------------------------------------------
-  // Live summary sentence
-  // ---------------------------------------------------------------------------
   function buildSummary(): string {
     const parts: string[] = [`${duration}s elapsed`];
     if (profitInput && parseFloat(profitInput) > 0)
@@ -71,9 +27,6 @@ export default function LobbyPage() {
     return `Game ends when: ${parts.join(', or ')}`;
   }
 
-  // ---------------------------------------------------------------------------
-  // Navigation
-  // ---------------------------------------------------------------------------
   function handleLaunch() {
     const params = new URLSearchParams();
     params.set('duration', String(duration));
@@ -81,119 +34,117 @@ export default function LobbyPage() {
       params.set('profitThreshold', profitInput);
     if (lossInput && parseFloat(lossInput) > 0)
       params.set('lossThreshold', lossInput);
-
     router.push(`/game?${params.toString()}`);
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
   return (
-    <main className="min-h-screen bg-black flex items-center justify-center px-4">
-      <div className="w-full max-w-md border border-slate-700 rounded-lg p-8 flex flex-col gap-6 bg-slate-900">
-        <h2 className="text-2xl font-bold text-white tracking-widest text-center uppercase">
-          Mission Config
-        </h2>
+    <main className="relative min-h-screen flex items-center justify-center px-4">
+      {/* Starfield */}
+      <div className="starfield" />
 
-        {/* ---------------------------------------------------------------- */}
-        {/* GAME DURATION                                                    */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex flex-col gap-2">
-          <label className="text-slate-400 text-sm uppercase tracking-wider">
-            Game Duration
-          </label>
-          <div className="flex gap-3">
-            {([30, 60] as const).map((d) => (
-              <button
-                key={d}
-                onClick={() => setDuration(d)}
-                className={`flex-1 py-2 rounded border text-sm font-bold tracking-widest transition-colors ${
-                  duration === d
-                    ? 'border-cyan-400 text-cyan-400 bg-cyan-400/10'
-                    : 'border-slate-600 text-slate-400 hover:border-slate-400'
-                }`}
-              >
-                {d}s
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* PROFIT THRESHOLD                                                 */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex flex-col gap-2">
-          <label className="text-slate-400 text-sm uppercase tracking-wider">
-            Take Profit At
-          </label>
-          <div className="flex items-center border border-slate-600 rounded px-3 py-2 focus-within:border-cyan-400 transition-colors">
-            <span className="text-slate-500 mr-1">+$</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="e.g. 10.00"
-              value={profitInput}
-              onChange={(e) => setProfitInput(e.target.value)}
-              className="flex-1 bg-transparent text-white outline-none placeholder-slate-600 text-sm"
-            />
-          </div>
-        </div>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* LOSS THRESHOLD                                                   */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex flex-col gap-2">
-          <label className="text-slate-400 text-sm uppercase tracking-wider">
-            Stop Loss At
-          </label>
-          <div className="flex items-center border border-slate-600 rounded px-3 py-2 focus-within:border-orange-400 transition-colors">
-            <span className="text-slate-500 mr-1">-$</span>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder="e.g. 5.00"
-              value={lossInput}
-              onChange={(e) => setLossInput(e.target.value)}
-              className="flex-1 bg-transparent text-white outline-none placeholder-slate-600 text-sm"
-            />
-          </div>
-        </div>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* Live summary                                                     */}
-        {/* ---------------------------------------------------------------- */}
-        <p className="text-slate-500 text-xs italic leading-relaxed border border-slate-700 rounded p-3">
-          {buildSummary()}
-        </p>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* Live price + balance footer                                      */}
-        {/* ---------------------------------------------------------------- */}
-        <div className="flex justify-between text-xs text-slate-500">
-          <span>
-            BTC/USD{' '}
-            <span className={`font-bold ${isConnected ? 'text-cyan-400' : 'text-slate-600'}`}>
-              {currentPrice > 0 ? `$${currentPrice.toLocaleString()}` : '—'}
-            </span>
-          </span>
-          <span>
-            Balance{' '}
-            <span className="font-bold text-slate-300">{accountBalance}</span>
-          </span>
-        </div>
-
-        {/* ---------------------------------------------------------------- */}
-        {/* LAUNCH                                                           */}
-        {/* ---------------------------------------------------------------- */}
-        <button
-          onClick={handleLaunch}
-          className="w-full py-3 text-sm font-bold tracking-widest uppercase rounded border border-cyan-400 text-cyan-400 hover:bg-cyan-400 hover:text-black transition-colors duration-200"
-          style={{ boxShadow: '0 0 20px rgba(0, 200, 255, 0.2)' }}
+      <div className="relative z-10 w-full max-w-md">
+        {/* Back button */}
+        <Link
+          href="/"
+          className="inline-block mb-4"
         >
-          LAUNCH
-        </button>
+          <div className="pixel-btn text-xs px-3 py-2">
+            &larr; BACK
+          </div>
+        </Link>
+
+        <div className="pixel-panel p-6 flex flex-col gap-5">
+          <h2 className="text-sm md:text-base text-retro-white text-center uppercase tracking-wider">
+            Mission Config
+          </h2>
+
+          {/* Duration */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
+              Game Duration
+            </label>
+            <div className="flex gap-3">
+              {([30, 60] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDuration(d)}
+                  className={`flex-1 pixel-btn text-xs py-2 ${
+                    duration === d ? 'pixel-btn-green' : ''
+                  }`}
+                >
+                  {d}s
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Profit threshold */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
+              Take Profit At
+            </label>
+            <div className="flex items-center border-4 border-retro-border bg-space-deeper px-3 py-2">
+              <span className="text-retro-green text-xs mr-2">+$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g. 10.00"
+                value={profitInput}
+                onChange={(e) => setProfitInput(e.target.value)}
+                className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Loss threshold */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
+              Stop Loss At
+            </label>
+            <div className="flex items-center border-4 border-retro-border bg-space-deeper px-3 py-2">
+              <span className="text-retro-red text-xs mr-2">-$</span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g. 5.00"
+                value={lossInput}
+                onChange={(e) => setLossInput(e.target.value)}
+                className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
+              />
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="border-4 border-retro-white/20 p-3">
+            <p className="text-[8px] text-retro-white/50 leading-relaxed">
+              {buildSummary()}
+            </p>
+          </div>
+
+          {/* Price + balance */}
+          <div className="flex justify-between text-[8px] text-retro-white/40">
+            <span>
+              BTC/USD{' '}
+              <span className={`font-bold ${isConnected ? 'text-retro-green' : 'text-retro-gray'}`}>
+                {currentPrice > 0 ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '--'}
+              </span>
+            </span>
+            <span>
+              Balance{' '}
+              <span className="font-bold text-retro-white/70">$10,000 (mock)</span>
+            </span>
+          </div>
+
+          {/* Launch */}
+          <button
+            onClick={handleLaunch}
+            className="w-full pixel-btn pixel-btn-green text-sm py-3"
+          >
+            LAUNCH
+          </button>
+        </div>
       </div>
     </main>
   );

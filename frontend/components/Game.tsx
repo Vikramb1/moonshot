@@ -1,10 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useMockPrice } from '@/lib/useMockPrice';
+import { useLiquid } from '@/lib/useLiquid';
 import { useGameEngine } from '@/lib/useGameEngine';
 import HUD from './HUD';
 import type { GameParams, GameResult, Order } from '@/types';
+
+interface TradeLogEntry {
+  side: 'long' | 'short';
+  price: number;
+  size: number;
+  timestamp: number;
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -17,14 +24,12 @@ const SAFE_ZONE_HALF = 32;
 const ASTEROID_BASE_INTERVAL = 28;
 const GAME_AREA_PCT = 0.75;
 const PRICE_AXIS_W = 68;
-const EARNINGS_PER_SECOND = 0.50;
-
-// Chart range — tuned for low volatility ±0.01%
-const VISIBLE_RANGE_PCT = 0.0001;
-const CHART_HEIGHT_FRACTION = 0.35;
+// Chart range — tuned for ETH volatility ±0.2%
+const VISIBLE_RANGE_PCT = 0.002;
+const CHART_HEIGHT_FRACTION = 0.6;
 
 // Simulated price constants
-const SEED_PRICE = 65000;
+const SEED_PRICE = 2500;
 const NOISE_FREQUENCY = 0.06;
 
 // Colors
@@ -147,16 +152,15 @@ interface GameProps {
 }
 
 export default function Game({ params, onGameEnd }: GameProps) {
-  const { currentPrice, previousPrice, priceDirection, isConnected } = useMockPrice();
+  const { currentPrice, previousPrice, priceDirection, isConnected } = useLiquid('ETH-PERP');
   const engine = useGameEngine(params);
+  const [tradeLog, setTradeLog] = useState<TradeLogEntry[]>([]);
 
   const bgCanvasRef = useRef<HTMLCanvasElement>(null);
   const gameCanvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number>(0);
   const frameRef = useRef(0);
 
-  const [zoneNotif, setZoneNotif] = useState<{ text: string; key: number } | null>(null);
-  const zoneNotifTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hitFlash, setHitFlash] = useState(false);
   const hitFlashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [secondsOnTarget, setSecondsOnTarget] = useState(0);
@@ -187,7 +191,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
     targetMax: 0,
     rescaleStartMin: 0,
     rescaleStartMax: 0,
-    rescaleFrame: 45,
+    rescaleFrame: 20,
     // Simulated price state
     simPrice: SEED_PRICE,
     simNoiseAmp: SEED_PRICE * 0.0001,
@@ -202,9 +206,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
     floatingTexts: [] as FloatingText[],
     shieldAlpha: 0,
     wasInSafe: false,
-    consecutiveZoneFrames: 0,
     totalZoneFrames: 0,
-    totalZoneEarnings: 0,
     flashRed: 0,
     flashWhite: { x: 0, y: 0, life: 0 },
     mounted: false,
@@ -221,7 +223,10 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
   useEffect(() => {
     const s = stateRef.current;
-    const down = (e: KeyboardEvent) => { s.keys[e.key] = true; s.keys[e.code] = true; };
+    const down = (e: KeyboardEvent) => {
+      s.keys[e.key] = true; s.keys[e.code] = true;
+      if (e.key === 'Escape') engine.endGame('time');
+    };
     const up = (e: KeyboardEvent) => { s.keys[e.key] = false; s.keys[e.code] = false; };
     window.addEventListener('keydown', down);
     window.addEventListener('keyup', up);
@@ -236,6 +241,34 @@ export default function Game({ params, onGameEnd }: GameProps) {
     s.interpFrame = 0;
     s.lastWsPrice = currentPrice;
   }, [currentPrice]);
+
+  // ---- Tilt-based trading every 1s ----
+  useEffect(() => {
+    if (engine.gameStatus !== 'playing') return;
+    const interval = setInterval(() => {
+      const tilt = stateRef.current.shipTiltAngle;
+      if (Math.abs(tilt) < 0.01) return; // dead zone
+      const side: 'long' | 'short' = tilt < 0 ? 'long' : 'short';
+      const price = stateRef.current.interpPrice;
+      const size = params.positionSize;
+      // Dummy trade — no real API call
+      const data = { success: true, order_id: 'dummy-' + Date.now() };
+      const order: Order = {
+        coinId: `tilt-${Date.now()}`,
+        priceLevel: price,
+        size,
+        side: side === 'long' ? 'buy' : 'sell',
+        timestamp: Date.now(),
+        liquidOrderId: data.order_id,
+      };
+      engine.addOrder(order);
+      setTradeLog((prev) => {
+        const next = [...prev, { side, price, size, timestamp: Date.now() }];
+        return next.length > 50 ? next.slice(-50) : next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [engine.gameStatus, params.positionSize]);
 
   useEffect(() => {
     const resize = () => {
@@ -278,7 +311,7 @@ export default function Game({ params, onGameEnd }: GameProps) {
       s.targetMax = s.animMax;
       s.rescaleStartMin = s.animMin;
       s.rescaleStartMax = s.animMax;
-      s.rescaleFrame = 45;
+      s.rescaleFrame = 20;
       for (let i = 0; i < 220; i++) {
         s.stars.push({
           x: Math.random() * gC.width, y: Math.random() * gC.height,
@@ -343,8 +376,8 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
       // --- Dynamic rescaling (±0.01% range, 10% edge trigger, 45-frame anim) ---
       const visRange = s.animMax - s.animMin;
-      if (displayPrice < s.animMin + visRange * 0.10 ||
-          displayPrice > s.animMax - visRange * 0.10) {
+      if (displayPrice < s.animMin + visRange * 0.20 ||
+          displayPrice > s.animMax - visRange * 0.20) {
         const newHalf = displayPrice * VISIBLE_RANGE_PCT;
         s.rescaleStartMin = s.animMin;
         s.rescaleStartMax = s.animMax;
@@ -352,9 +385,9 @@ export default function Game({ params, onGameEnd }: GameProps) {
         s.targetMax = displayPrice + newHalf;
         s.rescaleFrame = 0;
       }
-      if (s.rescaleFrame < 45) {
+      if (s.rescaleFrame < 20) {
         s.rescaleFrame++;
-        const rt = s.rescaleFrame / 45;
+        const rt = s.rescaleFrame / 20;
         s.animMin = lerp(s.rescaleStartMin, s.targetMin, rt);
         s.animMax = lerp(s.rescaleStartMax, s.targetMax, rt);
       }
@@ -418,31 +451,11 @@ export default function Game({ params, onGameEnd }: GameProps) {
 
       if (inSafe) {
         s.totalZoneFrames++;
-        s.consecutiveZoneFrames++;
-        if (s.consecutiveZoneFrames > 0 && s.consecutiveZoneFrames % 60 === 0) {
-          s.totalZoneEarnings += EARNINGS_PER_SECOND;
-          engine.addZoneEarnings(EARNINGS_PER_SECOND);
-          setZoneNotif({ text: `+$${EARNINGS_PER_SECOND.toFixed(2)}`, key: Date.now() });
-          if (zoneNotifTimeout.current) clearTimeout(zoneNotifTimeout.current);
-          zoneNotifTimeout.current = setTimeout(() => setZoneNotif(null), 1700);
-
-          // Place an order for each zone earning — always uses real price
-          const order: Order = {
-            coinId: `zone-${Date.now()}`,
-            priceLevel: s.interpPrice,
-            size: EARNINGS_PER_SECOND,
-            side: s.interpPrice > s.interpPrev ? 'buy' : 'sell',
-            timestamp: Date.now(),
-            liquidOrderId: `mock-${Date.now()}`,
-          };
-          engine.addOrder(order);
-        }
         if (s.totalZoneFrames % 60 === 0) {
           setSecondsOnTarget(Math.floor(s.totalZoneFrames / 60));
         }
       } else {
         engine.adjustHealth(-0.04);
-        s.consecutiveZoneFrames = 0;
       }
 
       s.shieldAlpha = inSafe
@@ -834,7 +847,6 @@ export default function Game({ params, onGameEnd }: GameProps) {
         estimatedPnL={engine.totalPnL}
         health={engine.health}
         hitFlash={hitFlash}
-        zoneNotification={zoneNotif}
       />
 
       {/* Price axis */}
@@ -880,6 +892,26 @@ export default function Game({ params, onGameEnd }: GameProps) {
           </span>
         </div>
       </div>
+
+      {/* Trade log panel */}
+      {tradeLog.length > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 0, left: 0, right: 0,
+          height: 120, zIndex: 15,
+          background: 'rgba(6, 8, 20, 0.88)',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+          overflowY: 'auto',
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 12,
+          padding: '6px 12px',
+        }} ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}>
+          {tradeLog.map((t, i) => (
+            <div key={i} style={{ color: t.side === 'long' ? '#40a030' : '#c03020', lineHeight: '18px' }}>
+              {t.side === 'long' ? 'BOUGHT' : 'SOLD'} ETH @ ${t.price.toFixed(2)} · ${t.size.toFixed(2)}
+            </div>
+          ))}
+        </div>
+      )}
 
       {!isConnected && (
         <div style={{

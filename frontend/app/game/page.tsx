@@ -22,7 +22,9 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
   const profitThreshold = rawProfit ? parseFloat(rawProfit) : null;
   const rawLoss = searchParams.get('lossThreshold');
   const lossThreshold = rawLoss ? parseFloat(rawLoss) : null;
-  return { duration, profitThreshold, lossThreshold };
+  const rawPos = searchParams.get('positionSize');
+  const positionSize = rawPos ? Math.max(0.5, parseFloat(rawPos)) : 0.5;
+  return { duration, profitThreshold, lossThreshold, positionSize };
 }
 
 function GamePageInner() {

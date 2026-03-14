@@ -219,7 +219,7 @@ async def trade(body: TradeRequest):
         return {"success": False, "error": str(exc)}
 
     async def close_after_delay():
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.1)
         try:
             liquid.close_position(body.symbol)
         except Exception as exc:
@@ -233,7 +233,7 @@ async def trade(body: TradeRequest):
         "side": body.side,
         "size": body.size,
         "symbol": body.symbol,
-        "closes_in_ms": 1000,
+        "closes_in_ms": 100,
     }
 
 

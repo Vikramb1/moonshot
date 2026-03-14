@@ -33,7 +33,6 @@ interface HUDProps {
   estimatedPnL: number;
   health: number;
   hitFlash: boolean;
-  zoneNotification: { text: string; key: number } | null;
 }
 
 export default function HUD({
@@ -46,7 +45,6 @@ export default function HUD({
   estimatedPnL,
   health,
   hitFlash,
-  zoneNotification,
 }: HUDProps) {
   const [priceScale, setPriceScale] = useState(false);
   const [hullBreach, setHullBreach] = useState(false);
@@ -139,7 +137,7 @@ export default function HUD({
         position: 'absolute', top: 16, left: 16,
         padding: '10px 14px',
       }}>
-        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>BTC / USD</div>
+        <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>ETH / USD</div>
         <div style={{
           fontSize: 14, fontWeight: 'bold', color: '#f0f0e0',
           transform: priceScale ? 'scale(1.04)' : 'scale(1)',
@@ -250,25 +248,6 @@ export default function HUD({
         </div>
       </div>
 
-      {/* Zone earnings notification — bottom center */}
-      {zoneNotification && (
-        <div key={zoneNotification.key} style={{
-          position: 'absolute', bottom: 40, left: '50%',
-          transform: 'translateX(-50%)',
-          border: '4px solid #40a030',
-          background: 'rgba(13, 31, 45, 0.9)',
-          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
-          padding: '8px 20px',
-          fontSize: 8, fontWeight: 'bold',
-          color: '#40a030',
-          animation: 'zoneEarn 1.7s ease-out forwards',
-          pointerEvents: 'none',
-          textTransform: 'uppercase',
-          letterSpacing: 1,
-        }}>
-          {zoneNotification.text}
-        </div>
-      )}
 
       {/* Hull breach overlay */}
       {hullBreach && (
@@ -291,12 +270,6 @@ export default function HUD({
           0% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
           50% { transform: translate(-50%, -50%) scale(1.08); }
           100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
-        }
-        @keyframes zoneEarn {
-          0% { opacity: 1; transform: translateX(-50%) translateY(10px); }
-          12% { opacity: 1; transform: translateX(-50%) translateY(0); }
-          82% { opacity: 1; transform: translateX(-50%) translateY(0); }
-          100% { opacity: 0; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
     </div>

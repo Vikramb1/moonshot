@@ -20,7 +20,7 @@ export function useGameEngine(params: GameParams) {
   const healthRef = useRef(100);
   const timeRemainingRef = useRef<number>(params.duration);
   const totalPnLRef = useRef(0);
-  const totalZoneEarningsRef = useRef(0);
+  const totalZoneEarningsRef = useRef(0); // kept for GameResult
 
   const startGame = useCallback(() => {
     endedRef.current = false;
@@ -102,9 +102,6 @@ export function useGameEngine(params: GameParams) {
     });
   }, []);
 
-  const addZoneEarnings = useCallback((amount: number) => {
-    totalZoneEarningsRef.current += amount;
-  }, []);
 
   const checkGameEndConditions = useCallback(
     (currentPnL: number) => {
@@ -127,7 +124,7 @@ export function useGameEngine(params: GameParams) {
   return {
     gameStatus, ordersPlaced, timeRemaining, totalPnL, health,
     gameResult, startGame, endGame, addOrder, takeDamage, adjustHealth,
-    checkGameEndConditions, addZoneEarnings,
+    checkGameEndConditions,
     // Refs for direct game loop access (avoids stale closures)
     endedRef, healthRef, timeRemainingRef, ordersRef,
   };

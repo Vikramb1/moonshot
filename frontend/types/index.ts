@@ -13,6 +13,7 @@ export interface GameParams {
   duration: 30 | 60;
   profitThreshold: number | null;
   lossThreshold: number | null;
+  positionSize: number;
 }
 
 /**

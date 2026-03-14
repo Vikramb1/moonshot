@@ -8,15 +8,16 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useMockPrice } from '@/lib/useMockPrice';
+import { useLiquid } from '@/lib/useLiquid';
 
 export default function LobbyPage() {
   const router = useRouter();
-  const { currentPrice, isConnected } = useMockPrice();
+  const { currentPrice, isConnected } = useLiquid('ETH-PERP');
 
   const [duration, setDuration] = useState<30 | 60>(60);
   const [profitInput, setProfitInput] = useState<string>('');
   const [lossInput, setLossInput] = useState<string>('');
+  const [positionSize, setPositionSize] = useState<string>('0.5');
 
   function buildSummary(): string {
     const parts: string[] = [`${duration}s elapsed`];
@@ -34,6 +35,8 @@ export default function LobbyPage() {
       params.set('profitThreshold', profitInput);
     if (lossInput && parseFloat(lossInput) > 0)
       params.set('lossThreshold', lossInput);
+    const ps = parseFloat(positionSize);
+    if (ps >= 0.5) params.set('positionSize', String(ps));
     router.push(`/game?${params.toString()}`);
   }
 
@@ -116,6 +119,25 @@ export default function LobbyPage() {
             </div>
           </div>
 
+          {/* Position Size */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-retro-white/60 uppercase tracking-wider">
+              Position Size (USD)
+            </label>
+            <div className="flex items-center border-4 border-retro-border bg-space-deeper px-3 py-2">
+              <span className="text-retro-white/60 text-xs mr-2">$</span>
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={positionSize}
+                onChange={(e) => setPositionSize(e.target.value)}
+                className="flex-1 bg-transparent text-retro-white outline-none placeholder-retro-white/20 text-xs"
+              />
+            </div>
+            <p className="text-[7px] text-retro-white/30">25x leverage · min $0.50</p>
+          </div>
+
           {/* Summary */}
           <div className="border-4 border-retro-white/20 p-3">
             <p className="text-[8px] text-retro-white/50 leading-relaxed">
@@ -126,7 +148,7 @@ export default function LobbyPage() {
           {/* Price + balance */}
           <div className="flex justify-between text-[8px] text-retro-white/40">
             <span>
-              BTC/USD{' '}
+              ETH/USD{' '}
               <span className={`font-bold ${isConnected ? 'text-retro-green' : 'text-retro-gray'}`}>
                 {currentPrice > 0 ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '--'}
               </span>

@@ -9,6 +9,7 @@ dependencies = [
   "python-dotenv",
   "httpx",
   "liquidtrading-python",
+  "anthropic",
 ]
 
 [tool.hatch.build.targets.wheel]

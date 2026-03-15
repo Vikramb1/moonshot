@@ -691,18 +691,13 @@ export default function SurfGame({ params, onGameEnd }: SurfGameProps) {
         ctx.restore();
       }
 
-      // --- Darkness wall (right side) ---
+      // --- Darkness wall — extends from ship to price axis ---
       ctx.fillStyle = COL_BG;
-      ctx.fillRect(shipX, 0, gameW - shipX, H);
+      ctx.fillRect(shipX, 0, W - PRICE_AXIS_W - shipX, H);
       const darkGrad = ctx.createLinearGradient(shipX - 24, 0, shipX, 0);
       darkGrad.addColorStop(0, 'rgba(10, 26, 46, 0)');
       darkGrad.addColorStop(1, 'rgba(10, 26, 46, 1)');
       ctx.fillStyle = darkGrad; ctx.fillRect(shipX - 24, 0, 24, H);
-
-      ctx.fillStyle = 'rgba(8, 18, 30, 0.6)';
-      ctx.fillRect(gameW, 0, W - gameW - PRICE_AXIS_W, H);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(gameW, 0); ctx.lineTo(gameW, H); ctx.stroke();
 
       // --- Current price dashed line ---
       ctx.save();
@@ -719,15 +714,15 @@ export default function SurfGame({ params, onGameEnd }: SurfGameProps) {
       const sineOsc = Math.sin(frame / 60 * Math.PI * 2 / 3) * 0.02;
       ctx.globalAlpha = 1 + sineOsc;
       ctx.fillStyle = inSafe ? 'rgba(64, 220, 200, 0.07)' : 'rgba(64, 220, 200, 0.03)';
-      ctx.fillRect(0, safeTop, gameW, safeBot - safeTop);
+      ctx.fillRect(0, safeTop, W - PRICE_AXIS_W, safeBot - safeTop);
       ctx.restore();
 
       const dashOff = (frame * 1.2) % 24;
       ctx.save();
       ctx.setLineDash([14, 10]); ctx.lineDashOffset = -dashOff;
       ctx.strokeStyle = 'rgba(64, 220, 200, 0.2)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(0, safeTop); ctx.lineTo(gameW, safeTop); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, safeBot); ctx.lineTo(gameW, safeBot); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, safeTop); ctx.lineTo(W - PRICE_AXIS_W, safeTop); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, safeBot); ctx.lineTo(W - PRICE_AXIS_W, safeBot); ctx.stroke();
       ctx.setLineDash([]);
       ctx.restore();
 
@@ -905,16 +900,16 @@ export default function SurfGame({ params, onGameEnd }: SurfGameProps) {
       {/* Trade log panel */}
       {tradeLog.length > 0 && (
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          height: 120, zIndex: 15,
+          position: 'absolute', bottom: 0, left: 0, right: PRICE_AXIS_W,
+          maxHeight: 80, zIndex: 15,
           background: 'rgba(10, 20, 36, 0.88)',
           borderTop: '1px solid rgba(32, 176, 176, 0.15)',
-          overflowY: 'auto',
+          overflowY: 'hidden',
           fontFamily: "'Space Mono', monospace",
           fontSize: 12,
           padding: '6px 12px',
-        }} ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}>
-          {tradeLog.map((t, i) => (
+        }}>
+          {tradeLog.slice(-8).map((t, i) => (
             <div key={i} style={{ color: t.side === 'long' ? '#20b0b0' : '#c03020', lineHeight: '18px' }}>
               {t.side === 'long' ? 'BOUGHT' : 'SOLD'} ETH @ ${t.price.toFixed(2)} · ${t.size.toFixed(2)}
             </div>

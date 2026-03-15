@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import type { GameParams, GameResult } from '@/types';
+import type { GameParams, GameResult, TradingSymbol } from '@/types';
 
 const SurfGame = dynamic(() => import('@/components/SurfGame'), { ssr: false });
 const SurfRevealScreen = dynamic(() => import('@/components/SurfRevealScreen'), { ssr: false });
@@ -17,7 +17,11 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
   const lossThreshold = rawLoss ? parseFloat(rawLoss) : null;
   const rawSize = searchParams.get('positionSize');
   const positionSize = rawSize ? parseFloat(rawSize) : 0.5;
-  return { duration, profitThreshold, lossThreshold, positionSize, symbol: 'ETH-PERP' as const, useLive: false };
+  const rawSymbol = searchParams.get('symbol');
+  const validSymbols: TradingSymbol[] = ['ETH-PERP', 'BTC-PERP', 'SOL-PERP', 'DOGE-PERP'];
+  const symbol: TradingSymbol = validSymbols.includes(rawSymbol as TradingSymbol) ? rawSymbol as TradingSymbol : 'ETH-PERP';
+  const useLive = searchParams.get('useLive') === '1';
+  return { duration, profitThreshold, lossThreshold, positionSize, symbol, useLive };
 }
 
 function SurfGamePageInner() {
@@ -60,14 +64,30 @@ function SurfGamePageInner() {
       {gameStatus === 'countdown' && (
         <div className="absolute inset-0 z-20 flex items-center justify-center">
           <div className="ocean-bg" />
-          <span
-            className="relative z-10 text-6xl md:text-8xl text-ocean-foam"
-            style={{
-              textShadow: '0 0 40px rgba(32, 176, 176, 0.8), 0 4px 0 #188080',
-            }}
-          >
-            {countdownValue > 0 ? countdownValue : 'SURF!'}
-          </span>
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative z-10 flex flex-col items-center gap-6">
+            <span className="text-[10px] md:text-xs text-ocean-foam/50 uppercase tracking-[0.3em]">
+              {gameParams.symbol.replace('-PERP', '')} · {gameParams.duration}s · Surf Shark
+            </span>
+            <span
+              className="text-7xl md:text-9xl text-ocean-foam font-bold"
+              style={{
+                textShadow: '0 0 60px rgba(32, 176, 176, 0.9), 0 0 120px rgba(32, 176, 176, 0.4), 0 6px 0 #188080',
+                animation: 'countdownPulse 1s ease-in-out infinite',
+              }}
+            >
+              {countdownValue > 0 ? countdownValue : 'SURF!'}
+            </span>
+            <span className="text-[8px] text-ocean-foam/30 uppercase tracking-widest mt-2">
+              W/S or Arrow keys to move
+            </span>
+          </div>
+          <style>{`
+            @keyframes countdownPulse {
+              0%, 100% { transform: scale(1); }
+              50% { transform: scale(1.06); }
+            }
+          `}</style>
         </div>
       )}
 

@@ -37,15 +37,34 @@ body {
 
 .pixel-btn-green {
   background: #40a030;
-  box-shadow: 0 4px 0 #308020, 0 6px 8px rgba(0, 0, 0, 0.3);
+  border-color: #60d050;
+  box-shadow: 0 4px 0 #308020, 0 6px 8px rgba(0, 0, 0, 0.3), 0 0 14px rgba(64, 160, 48, 0.35);
 }
 
 .pixel-btn-green:hover {
-  box-shadow: 0 5px 0 #308020, 0 7px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 5px 0 #308020, 0 7px 10px rgba(0, 0, 0, 0.3), 0 0 18px rgba(64, 160, 48, 0.4);
 }
 
 .pixel-btn-green:active {
-  box-shadow: 0 2px 0 #308020, 0 3px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 0 #308020, 0 3px 4px rgba(0, 0, 0, 0.3), 0 0 10px rgba(64, 160, 48, 0.3);
+}
+
+.pixel-btn-dim {
+  background: rgba(224, 96, 48, 0.12);
+  border-color: rgba(248, 248, 240, 0.3);
+  color: rgba(240, 240, 224, 0.45);
+  box-shadow: 0 4px 0 rgba(184, 72, 32, 0.2), 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+.pixel-btn-dim:hover {
+  background: rgba(224, 96, 48, 0.3);
+  color: rgba(240, 240, 224, 0.8);
+  box-shadow: 0 5px 0 rgba(184, 72, 32, 0.3), 0 7px 10px rgba(0, 0, 0, 0.2);
+}
+
+.pixel-btn-dim:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(184, 72, 32, 0.2), 0 3px 4px rgba(0, 0, 0, 0.15);
 }
 
 .pixel-btn-gray {
@@ -200,13 +219,101 @@ body {
 
 .wave-btn-green {
   background: #20b0b0;
-  box-shadow: 0 4px 0 #188080, 0 6px 8px rgba(0, 0, 0, 0.3);
+  border-color: #40d0d0;
+  box-shadow: 0 4px 0 #188080, 0 6px 8px rgba(0, 0, 0, 0.3), 0 0 14px rgba(32, 176, 176, 0.35);
 }
 
 .wave-btn-green:hover {
-  box-shadow: 0 5px 0 #188080, 0 7px 10px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 5px 0 #188080, 0 7px 10px rgba(0, 0, 0, 0.3), 0 0 18px rgba(32, 176, 176, 0.4);
 }
 
 .wave-btn-green:active {
-  box-shadow: 0 2px 0 #188080, 0 3px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 0 #188080, 0 3px 4px rgba(0, 0, 0, 0.3), 0 0 10px rgba(32, 176, 176, 0.3);
+}
+
+.wave-btn-dim {
+  background: rgba(32, 128, 160, 0.12);
+  border-color: rgba(32, 176, 176, 0.3);
+  color: rgba(224, 240, 255, 0.4);
+  box-shadow: 0 4px 0 rgba(24, 96, 128, 0.2), 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+.wave-btn-dim:hover {
+  background: rgba(32, 128, 160, 0.3);
+  color: rgba(224, 240, 255, 0.8);
+  box-shadow: 0 5px 0 rgba(24, 96, 128, 0.3), 0 7px 10px rgba(0, 0, 0, 0.2);
+}
+
+.wave-btn-dim:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(24, 96, 128, 0.2), 0 3px 4px rgba(0, 0, 0, 0.15);
+}
+
+/* ------------------------------------------------------------------ */
+/* Forest theme (Custom / Describe a Game)                             */
+/* ------------------------------------------------------------------ */
+
+.forest-bg {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, #0d1f0d 0%, #060e06 100%);
+}
+
+.forest-panel {
+  border: 4px solid #40a030;
+  background: rgba(8, 20, 8, 0.92);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+}
+
+.forest-btn {
+  @apply px-6 py-3 font-bold uppercase tracking-wider text-sm;
+  border: 4px solid #40a030;
+  background: #308020;
+  color: #e0ffe0;
+  box-shadow: 0 4px 0 #206010, 0 6px 8px rgba(0, 0, 0, 0.3);
+  transition: transform 0.1s, box-shadow 0.1s;
+  border-radius: 4px;
+}
+
+.forest-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 #206010, 0 7px 10px rgba(0, 0, 0, 0.3);
+}
+
+.forest-btn:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 #206010, 0 3px 4px rgba(0, 0, 0, 0.3);
+}
+
+.forest-btn-green {
+  background: #40a030;
+  border-color: #60d050;
+  box-shadow: 0 4px 0 #308020, 0 6px 8px rgba(0, 0, 0, 0.3), 0 0 14px rgba(64, 160, 48, 0.35);
+}
+
+.forest-btn-green:hover {
+  box-shadow: 0 5px 0 #308020, 0 7px 10px rgba(0, 0, 0, 0.3), 0 0 18px rgba(64, 160, 48, 0.4);
+}
+
+.forest-btn-green:active {
+  box-shadow: 0 2px 0 #308020, 0 3px 4px rgba(0, 0, 0, 0.3), 0 0 10px rgba(64, 160, 48, 0.3);
+}
+
+.forest-btn-dim {
+  background: rgba(64, 160, 48, 0.12);
+  border-color: rgba(64, 160, 48, 0.3);
+  color: rgba(200, 255, 200, 0.4);
+  box-shadow: 0 4px 0 rgba(48, 128, 32, 0.2), 0 6px 8px rgba(0, 0, 0, 0.15);
+}
+
+.forest-btn-dim:hover {
+  background: rgba(64, 160, 48, 0.3);
+  color: rgba(200, 255, 200, 0.8);
+  box-shadow: 0 5px 0 rgba(48, 128, 32, 0.3), 0 7px 10px rgba(0, 0, 0, 0.2);
+}
+
+.forest-btn-dim:active {
+  transform: translateY(2px);
+  box-shadow: 0 2px 0 rgba(48, 128, 32, 0.2), 0 3px 4px rgba(0, 0, 0, 0.15);
 }

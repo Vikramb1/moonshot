@@ -659,18 +659,13 @@ export default function Game({ params, priceData, onGameEnd }: GameProps) {
         ctx.restore();
       }
 
-      // --- Darkness wall ---
+      // --- Darkness wall — extends from ship to price axis ---
       ctx.fillStyle = COL_BG;
-      ctx.fillRect(shipX, 0, gameW - shipX, H);
+      ctx.fillRect(shipX, 0, W - PRICE_AXIS_W - shipX, H);
       const darkGrad = ctx.createLinearGradient(shipX - 24, 0, shipX, 0);
       darkGrad.addColorStop(0, 'rgba(13, 8, 22, 0)');
       darkGrad.addColorStop(1, 'rgba(13, 8, 22, 1)');
       ctx.fillStyle = darkGrad; ctx.fillRect(shipX - 24, 0, 24, H);
-
-      ctx.fillStyle = 'rgba(8, 8, 20, 0.6)';
-      ctx.fillRect(gameW, 0, W - gameW - PRICE_AXIS_W, H);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(gameW, 0); ctx.lineTo(gameW, H); ctx.stroke();
 
       // --- Current price dashed line ---
       ctx.save();
@@ -848,6 +843,7 @@ export default function Game({ params, priceData, onGameEnd }: GameProps) {
         health={engine.health}
         hitFlash={hitFlash}
         symbol={params.symbol}
+        tradeLogVisible={tradeLog.length > 0}
       />
 
       {/* Price axis */}
@@ -894,21 +890,21 @@ export default function Game({ params, priceData, onGameEnd }: GameProps) {
         </div>
       </div>
 
-      {/* Trade log panel */}
+      {/* Trade log panel — compact, bottom-right to avoid HUD overlap */}
       {tradeLog.length > 0 && (
         <div style={{
-          position: 'absolute', bottom: 0, left: 0, right: 0,
-          height: 120, zIndex: 15,
-          background: 'rgba(6, 8, 20, 0.88)',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
+          position: 'absolute', bottom: 0, left: 200, right: PRICE_AXIS_W,
+          maxHeight: 80, zIndex: 15,
+          background: 'rgba(6, 8, 20, 0.92)',
+          borderTop: '1px solid rgba(255,255,255,0.06)',
           overflowY: 'auto',
           fontFamily: "'Space Mono', monospace",
-          fontSize: 12,
-          padding: '6px 12px',
+          fontSize: 10,
+          padding: '4px 10px',
         }} ref={(el) => { if (el) el.scrollTop = el.scrollHeight; }}>
-          {tradeLog.map((t, i) => (
-            <div key={i} style={{ color: t.side === 'long' ? '#40a030' : '#c03020', lineHeight: '18px' }}>
-              [{new Date(t.timestamp).toLocaleTimeString()}] {t.side === 'long' ? 'BOUGHT' : 'SOLD'} {params.symbol.replace('-PERP', '')} @ ${t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} · ${t.size.toFixed(2)}
+          {tradeLog.slice(-8).map((t, i) => (
+            <div key={i} style={{ color: t.side === 'long' ? '#40a030' : '#c03020', lineHeight: '16px' }}>
+              [{new Date(t.timestamp).toLocaleTimeString()}] {t.side === 'long' ? 'BUY' : 'SELL'} {params.symbol.replace('-PERP', '')} @ ${t.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} · ${t.size.toFixed(2)}
             </div>
           ))}
         </div>

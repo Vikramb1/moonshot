@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { getCustomGame } from '@/lib/customGameStorage';
-import type { GameParams, GameResult, CustomGameTheme } from '@/types';
+import type { GameParams, GameResult, CustomGameTheme, TradingSymbol } from '@/types';
 
 const CustomGame = dynamic(() => import('@/components/CustomGame'), { ssr: false });
 const CustomRevealScreen = dynamic(() => import('@/components/CustomRevealScreen'), { ssr: false });
@@ -14,13 +14,17 @@ function parseGameParams(searchParams: URLSearchParams): GameParams {
   const duration: 30 | 60 = rawDuration === '30' ? 30 : 60;
   const rawSize = searchParams.get('positionSize');
   const positionSize = rawSize ? Math.max(0.5, parseFloat(rawSize)) : 100;
+  const rawSymbol = searchParams.get('symbol');
+  const validSymbols: TradingSymbol[] = ['ETH-PERP', 'BTC-PERP', 'SOL-PERP', 'DOGE-PERP'];
+  const symbol: TradingSymbol = validSymbols.includes(rawSymbol as TradingSymbol) ? rawSymbol as TradingSymbol : 'ETH-PERP';
+  const useLive = searchParams.get('useLive') === '1';
   return {
     duration,
     profitThreshold: null,
     lossThreshold: null,
     positionSize,
-    symbol: 'ETH-PERP',
-    useLive: false,
+    symbol,
+    useLive,
   };
 }
 

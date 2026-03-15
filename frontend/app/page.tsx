@@ -20,29 +20,20 @@ export default function LandingPage() {
   const modes = [
     {
       href: '/lobby',
-      name: 'Moonshot 1.0',
-      desc: 'Fly through the grid, collect coins, place orders',
-      type: 'Space',
-      asset: 'ETH / BTC / SOL',
-      duration: '30s / 60s',
+      name: 'Orbit Space',
+      desc: 'Fly through the grid, dodge asteroids, place orders',
       color: '#e06030',
     },
     {
       href: '/surf/lobby',
       name: 'Surf Shark',
       desc: 'Ride the price wave, dodge sharks, earn profits',
-      type: 'Ocean',
-      asset: 'ETH-PERP',
-      duration: '30s / 60s',
       color: '#20b0b0',
     },
     {
       href: '/custom/create',
       name: 'Describe a Game',
       desc: 'Describe your avatar, world & obstacles — AI generates it',
-      type: 'Custom',
-      asset: 'ETH-PERP',
-      duration: '30s / 60s',
       color: '#40a030',
       badge: 'New',
     },
@@ -87,18 +78,6 @@ export default function LandingPage() {
                 <span className="text-[8px] md:text-[10px] text-retro-white/40 uppercase text-left">
                   {mode.desc}
                 </span>
-                {/* Info row */}
-                <div className="flex gap-4 mt-1">
-                  <span className="text-[7px] text-retro-white/30 uppercase">
-                    <span className="text-retro-white/50">Type:</span> {mode.type}
-                  </span>
-                  <span className="text-[7px] text-retro-white/30 uppercase">
-                    <span className="text-retro-white/50">Asset:</span> {mode.asset}
-                  </span>
-                  <span className="text-[7px] text-retro-white/30 uppercase">
-                    <span className="text-retro-white/50">Duration:</span> {mode.duration}
-                  </span>
-                </div>
               </div>
             </Link>
           ))}

@@ -39,7 +39,7 @@ export default function LobbyPage() {
       {/* Starfield */}
       <div className="starfield" />
 
-      <div className="relative z-10 w-full max-w-md">
+      <div className="relative z-10 w-full max-w-lg">
         {/* Back button */}
         <Link
           href="/"
@@ -52,7 +52,7 @@ export default function LobbyPage() {
 
         <div className="pixel-panel p-6 flex flex-col gap-5">
           <h2 className="text-sm md:text-base text-retro-white text-center uppercase tracking-wider">
-            Mission Config
+            Mission Control
           </h2>
 
           {/* Asset */}
@@ -66,7 +66,7 @@ export default function LobbyPage() {
                   key={s}
                   onClick={() => setSymbol(s)}
                   className={`flex-1 pixel-btn text-xs py-2 ${
-                    symbol === s ? 'pixel-btn-green' : ''
+                    symbol === s ? 'pixel-btn-green' : 'pixel-btn-dim'
                   }`}
                 >
                   {s.replace('-PERP', '')}
@@ -86,7 +86,7 @@ export default function LobbyPage() {
                   key={d}
                   onClick={() => setDuration(d)}
                   className={`flex-1 pixel-btn text-xs py-2 ${
-                    duration === d ? 'pixel-btn-green' : ''
+                    duration === d ? 'pixel-btn-green' : 'pixel-btn-dim'
                   }`}
                 >
                   {d}s
@@ -122,13 +122,13 @@ export default function LobbyPage() {
             <div className="flex gap-3">
               <button
                 onClick={() => setUseLive(false)}
-                className={`flex-1 pixel-btn text-xs py-2 ${!useLive ? 'pixel-btn-green' : ''}`}
+                className={`flex-1 pixel-btn text-xs py-2 ${!useLive ? 'pixel-btn-green' : 'pixel-btn-dim'}`}
               >
                 PAPER
               </button>
               <button
                 onClick={() => setUseLive(true)}
-                className={`flex-1 pixel-btn text-xs py-2 ${useLive ? 'pixel-btn-green' : ''}`}
+                className={`flex-1 pixel-btn text-xs py-2 ${useLive ? 'pixel-btn-green' : 'pixel-btn-dim'}`}
                 style={useLive ? { borderColor: '#c03020', background: 'rgba(192, 48, 32, 0.2)' } : {}}
               >
                 LIVE

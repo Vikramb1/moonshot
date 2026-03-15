@@ -79,26 +79,43 @@ function GamePageInner() {
       {gameStatus === 'countdown' && (
         <div className="absolute inset-0 z-20 flex items-center justify-center">
           <div className="starfield" />
-          <div className="relative z-10 flex flex-col items-center gap-4">
+          {/* Dark overlay for better contrast */}
+          <div className="absolute inset-0 bg-black/40" />
+          <div className="relative z-10 flex flex-col items-center gap-6">
+            <span className="text-[10px] md:text-xs text-retro-white/50 uppercase tracking-[0.3em]">
+              {gameParams.symbol.replace('-PERP', '')} · {gameParams.duration}s · Orbit Space
+            </span>
             <span
-              className="text-6xl md:text-8xl text-retro-white"
+              className="text-7xl md:text-9xl text-retro-white font-bold"
               style={{
-                textShadow: '0 0 40px rgba(224, 96, 48, 0.8), 0 4px 0 #b84820',
+                textShadow: '0 0 60px rgba(224, 96, 48, 0.9), 0 0 120px rgba(224, 96, 48, 0.4), 0 6px 0 #b84820',
+                animation: 'countdownPulse 1s ease-in-out infinite',
               }}
             >
               {countdownValue > 0 ? countdownValue : 'GO!'}
             </span>
-            {!priceData.isConnected && (
-              <span className="text-xs text-cyan-400/60">
-                Connecting to {gameParams.symbol.replace('-PERP', '')} price feed...
-              </span>
-            )}
-            {priceData.isConnected && priceData.currentPrice > 0 && (
-              <span className="text-xs text-green-400/60">
-                {gameParams.symbol.replace('-PERP', '')} ${priceData.currentPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}
-              </span>
-            )}
+            <div className="flex flex-col items-center gap-2">
+              {!priceData.isConnected && (
+                <span className="text-xs text-cyan-400/80 bg-black/30 px-3 py-1 rounded">
+                  Connecting to {gameParams.symbol.replace('-PERP', '')} price feed...
+                </span>
+              )}
+              {priceData.isConnected && priceData.currentPrice > 0 && (
+                <span className="text-xs text-green-400/80 bg-black/30 px-3 py-1 rounded">
+                  {gameParams.symbol.replace('-PERP', '')} ${priceData.currentPrice.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </span>
+              )}
+            </div>
+            <span className="text-[8px] text-retro-white/30 uppercase tracking-widest mt-2">
+              W/S or Arrow keys to move
+            </span>
           </div>
+          <style>{`
+            @keyframes countdownPulse {
+              0%, 100% { transform: scale(1); }
+              50% { transform: scale(1.06); }
+            }
+          `}</style>
         </div>
       )}
 

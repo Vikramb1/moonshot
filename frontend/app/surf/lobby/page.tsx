@@ -4,32 +4,26 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useLiquid } from '@/lib/useLiquid';
+import type { TradingSymbol } from '@/types';
 
 export default function SurfLobbyPage() {
   const router = useRouter();
-  const { currentPrice, isConnected } = useLiquid('ETH-PERP');
+  const [symbol, setSymbol] = useState<TradingSymbol>('ETH-PERP');
+  const { currentPrice, isConnected } = useLiquid(symbol);
 
   const [duration, setDuration] = useState<30 | 60>(60);
-  const [profitInput, setProfitInput] = useState<string>('');
-  const [lossInput, setLossInput] = useState<string>('');
   const [positionSize, setPositionSize] = useState<string>('0.5');
+  const [useLive, setUseLive] = useState(false);
 
   function buildSummary(): string {
-    const parts: string[] = [`${duration}s elapsed`];
-    if (profitInput && parseFloat(profitInput) > 0)
-      parts.push(`+$${parseFloat(profitInput).toFixed(2)} profit hit`);
-    if (lossInput && parseFloat(lossInput) > 0)
-      parts.push(`-$${parseFloat(lossInput).toFixed(2)} loss hit`);
-    return `Game ends when: ${parts.join(', or ')}`;
+    return `Game ends when: ${duration}s elapsed`;
   }
 
   function handleLaunch() {
     const params = new URLSearchParams();
     params.set('duration', String(duration));
-    if (profitInput && parseFloat(profitInput) > 0)
-      params.set('profitThreshold', profitInput);
-    if (lossInput && parseFloat(lossInput) > 0)
-      params.set('lossThreshold', lossInput);
+    params.set('symbol', symbol);
+    if (useLive) params.set('useLive', '1');
     const ps = parseFloat(positionSize);
     if (ps >= 0.5) params.set('positionSize', String(ps));
     router.push(`/surf/game?${params.toString()}`);
@@ -39,7 +33,7 @@ export default function SurfLobbyPage() {
     <main className="relative min-h-screen flex items-center justify-center px-4">
       <div className="ocean-bg" />
 
-      <div className="relative z-10 w-full max-w-md">
+      <div className="relative z-10 w-full max-w-lg">
         <Link href="/" className="inline-block mb-4">
           <div className="wave-btn text-xs px-3 py-2">
             &larr; BACK
@@ -48,8 +42,28 @@ export default function SurfLobbyPage() {
 
         <div className="wave-panel p-6 flex flex-col gap-5">
           <h2 className="text-sm md:text-base text-ocean-foam text-center uppercase tracking-wider">
-            Surf Config
+            Surf Station
           </h2>
+
+          {/* Asset */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-ocean-foam/60 uppercase tracking-wider">
+              Asset
+            </label>
+            <div className="flex gap-3">
+              {(['ETH-PERP', 'BTC-PERP', 'SOL-PERP', 'DOGE-PERP'] as const).map((s) => (
+                <button
+                  key={s}
+                  onClick={() => setSymbol(s)}
+                  className={`flex-1 wave-btn text-xs py-2 ${
+                    symbol === s ? 'wave-btn-green' : 'wave-btn-dim'
+                  }`}
+                >
+                  {s.replace('-PERP', '')}
+                </button>
+              ))}
+            </div>
+          </div>
 
           {/* Duration */}
           <div className="flex flex-col gap-2">
@@ -62,50 +76,12 @@ export default function SurfLobbyPage() {
                   key={d}
                   onClick={() => setDuration(d)}
                   className={`flex-1 wave-btn text-xs py-2 ${
-                    duration === d ? 'wave-btn-green' : ''
+                    duration === d ? 'wave-btn-green' : 'wave-btn-dim'
                   }`}
                 >
                   {d}s
                 </button>
               ))}
-            </div>
-          </div>
-
-          {/* Profit threshold */}
-          <div className="flex flex-col gap-2">
-            <label className="text-[8px] md:text-[10px] text-ocean-foam/60 uppercase tracking-wider">
-              Take Profit At
-            </label>
-            <div className="flex items-center border-4 border-ocean-teal bg-ocean-dark px-3 py-2 rounded">
-              <span className="text-ocean-teal text-xs mr-2">+$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="e.g. 10.00"
-                value={profitInput}
-                onChange={(e) => setProfitInput(e.target.value)}
-                className="flex-1 bg-transparent text-ocean-foam outline-none placeholder-ocean-foam/20 text-xs"
-              />
-            </div>
-          </div>
-
-          {/* Loss threshold */}
-          <div className="flex flex-col gap-2">
-            <label className="text-[8px] md:text-[10px] text-ocean-foam/60 uppercase tracking-wider">
-              Stop Loss At
-            </label>
-            <div className="flex items-center border-4 border-ocean-teal bg-ocean-dark px-3 py-2 rounded">
-              <span className="text-retro-red text-xs mr-2">-$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="e.g. 5.00"
-                value={lossInput}
-                onChange={(e) => setLossInput(e.target.value)}
-                className="flex-1 bg-transparent text-ocean-foam outline-none placeholder-ocean-foam/20 text-xs"
-              />
             </div>
           </div>
 
@@ -128,6 +104,33 @@ export default function SurfLobbyPage() {
             <p className="text-[7px] text-ocean-foam/30">25x leverage · min $0.50</p>
           </div>
 
+          {/* Trading Mode */}
+          <div className="flex flex-col gap-2">
+            <label className="text-[8px] md:text-[10px] text-ocean-foam/60 uppercase tracking-wider">
+              Trading Mode
+            </label>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setUseLive(false)}
+                className={`flex-1 wave-btn text-xs py-2 ${!useLive ? 'wave-btn-green' : 'wave-btn-dim'}`}
+              >
+                PAPER
+              </button>
+              <button
+                onClick={() => setUseLive(true)}
+                className={`flex-1 wave-btn text-xs py-2 ${useLive ? 'wave-btn-green' : 'wave-btn-dim'}`}
+                style={useLive ? { borderColor: '#c03020', background: 'rgba(192, 48, 32, 0.2)' } : {}}
+              >
+                LIVE
+              </button>
+            </div>
+            {useLive && (
+              <p className="text-[7px]" style={{ color: '#c03020' }}>
+                REAL MONEY — orders placed on Liquid exchange
+              </p>
+            )}
+          </div>
+
           {/* Summary */}
           <div className="border-4 border-ocean-teal/20 p-3 rounded">
             <p className="text-[8px] text-ocean-foam/50 leading-relaxed">
@@ -138,7 +141,7 @@ export default function SurfLobbyPage() {
           {/* Price + balance */}
           <div className="flex justify-between text-[8px] text-ocean-foam/40">
             <span>
-              ETH/USD{' '}
+              {symbol.replace('-PERP', '')}/USD{' '}
               <span className={`font-bold ${isConnected ? 'text-ocean-teal' : 'text-retro-gray'}`}>
                 {currentPrice > 0 ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '--'}
               </span>

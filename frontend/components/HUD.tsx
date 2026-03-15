@@ -34,6 +34,7 @@ interface HUDProps {
   health: number;
   hitFlash: boolean;
   symbol?: string;
+  tradeLogVisible?: boolean;
 }
 
 export default function HUD({
@@ -47,6 +48,7 @@ export default function HUD({
   health,
   hitFlash,
   symbol = 'ETH-PERP',
+  tradeLogVisible = false,
 }: HUDProps) {
   const [priceScale, setPriceScale] = useState(false);
   const [hullBreach, setHullBreach] = useState(false);
@@ -216,7 +218,7 @@ export default function HUD({
       {/* Top right — timer */}
       <div style={{
         ...panelStyle,
-        position: 'absolute', top: 16, right: 88,
+        position: 'absolute', top: 16, right: 84,
         padding: '10px 14px', textAlign: 'right',
       }}>
         <div style={{ fontSize: 7, letterSpacing: 2, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase' }}>TIME</div>
@@ -233,14 +235,15 @@ export default function HUD({
       {/* Bottom left — trade stats */}
       <div style={{
         ...panelStyle,
-        position: 'absolute', bottom: 20, left: 16,
+        position: 'absolute', bottom: tradeLogVisible ? 90 : 20, left: 16,
         padding: '8px 14px',
+        transition: 'bottom 0.3s ease',
       }}>
-        <div style={{ fontSize: 7, color: 'rgba(240,240,224,0.6)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+        <div style={{ fontSize: 8, color: 'rgba(240,240,224,0.7)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
           <span style={{ color: '#e06030' }}>●</span>{' '}
           {secondsOnTarget}s on target
         </div>
-        <div style={{ fontSize: 7, color: 'rgba(240,240,224,0.6)', textTransform: 'uppercase', letterSpacing: 1 }}>
+        <div style={{ fontSize: 8, color: 'rgba(240,240,224,0.7)', textTransform: 'uppercase', letterSpacing: 1 }}>
           <span style={{ color: '#e06030' }}>●</span>{' '}
           ${totalPlaced.toFixed(2)} placed
         </div>
